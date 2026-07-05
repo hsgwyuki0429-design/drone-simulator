@@ -1,4 +1,4 @@
-```html
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -270,7 +270,6 @@
             </div>
 
             <!-- Controller Settings / Buttons Block -->
-            <!-- Adjusted layout for 12 buttons -->
             <div id="center-buttons-area" class="flex flex-col gap-1 text-center justify-center transition-opacity duration-300 w-full px-2">
                 <div class="grid grid-cols-6 gap-1 w-full max-w-[360px] mx-auto">
                     <button id="sound-toggle-btn" class="px-1 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-[8px] rounded border border-amber-400 transition flex items-center justify-center gap-1 shadow-md">
@@ -308,9 +307,9 @@
                     <button id="gfx-toggle-btn" class="px-1 py-1.5 bg-slate-700 hover:bg-slate-600 text-white font-bold text-[8px] rounded border border-slate-500 transition flex items-center justify-center gap-1 shadow-md">
                         <i data-lucide="monitor" class="w-2.5 h-2.5"></i> GFX: HIGH
                     </button>
-                    <!-- --- NEW: Angle Mode Toggle Button --- -->
-                    <button id="angle-toggle-btn" class="px-1 py-1.5 bg-violet-700 hover:bg-violet-600 text-white font-bold text-[8px] rounded border border-violet-500 transition flex items-center justify-center gap-1 shadow-md">
-                        <i data-lucide="refresh-cw" class="w-2.5 h-2.5"></i> ANG: 180
+                    <!-- --- FIXED: Initial state set to NORMAL angle mode UI --- -->
+                    <button id="angle-toggle-btn" class="px-1 py-1.5 bg-fuchsia-700 hover:bg-fuchsia-600 text-white font-bold text-[8px] rounded border border-fuchsia-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="arrow-up-right" class="w-2.5 h-2.5"></i> ANG: NRM
                     </button>
                 </div>
                 <button id="how-to-play-btn" class="mt-1.5 px-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-[8px] rounded border border-zinc-600 transition flex items-center justify-center gap-1 shadow-md w-full max-w-[360px] mx-auto">
@@ -433,7 +432,7 @@
             { name: "RACE", wind: new THREE.Vector3(0, 0, 0) },
             { name: "GIANT SCHOOL", wind: new THREE.Vector3(0.5, 0.5, 0.2) } 
         ];
-        let activeMapConfig = mapConfigs[0];
+        let activeMapConfig = mapConfigs[4]; // Initialize config for EUROPE
         let lastRingTime = 0;
 
         const leftBase = document.getElementById('virtual-stick-left-base');
@@ -473,8 +472,9 @@
         let noiseGain = null;
         let audioEnabled = false;
 
+        // --- FIXED: Initial state updated as requested ---
         let isTPS = true;
-        let currentMapIndex = 0;
+        let currentMapIndex = 4; // EUROPE
         let gamepadIndex = null;
         let isEasyMode = true; 
         let lastGamepadButton0 = false; 
@@ -486,7 +486,7 @@
         let currentTrickStep = 0;
         let damageMode = 'CRASH'; 
         let gfxMode = 'HIGH'; 
-        let maxAngleMode = '180'; 
+        let maxAngleMode = 'NORMAL'; 
 
         let stickMode = 'FLOAT';
         let isSettingsHidden = false;
@@ -1129,6 +1129,63 @@
             spatialGrid.clear();
         };
 
+        const createEnvironment = () => {
+            const grassGeo = new THREE.PlaneGeometry(1000, 1000);
+            const grassMat = new THREE.MeshStandardMaterial({ 
+                map: grassTex.map, bumpMap: grassTex.bumpMap, bumpScale: 0.5, roughness: 0.9, metalness: 0.05 
+            });
+            const grass = new THREE.Mesh(grassGeo, grassMat);
+            grass.rotation.x = -Math.PI / 2;
+            grass.receiveShadow = true;
+            activeMapObjects.add(grass);
+
+            const asphaltGeo = new THREE.PlaneGeometry(60, 200);
+            const asphaltMat = new THREE.MeshStandardMaterial({ 
+                map: asphaltTex.map, bumpMap: asphaltTex.bumpMap, bumpScale: 0.3, roughness: 0.8 
+            });
+            const road = new THREE.Mesh(asphaltGeo, asphaltMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.set(0, 0.02, 20);
+            road.receiveShadow = true;
+            activeMapObjects.add(road);
+
+            const lineGeo = new THREE.PlaneGeometry(0.8, 10);
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xdddd00 }); 
+            for (let i = -80; i <= 100; i += 30) {
+                const line = new THREE.Mesh(lineGeo, lineMat);
+                line.rotation.x = -Math.PI / 2;
+                line.position.set(0, 0.03, i);
+                activeMapObjects.add(line);
+            }
+
+            const trunkGeo = new THREE.CylinderGeometry(0.4, 0.6, 6, 5); 
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
+            const foliageGeo = new THREE.ConeGeometry(3, 8, 6); 
+            const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e8c1e, roughness: 0.8 }); 
+
+            for (let i = 0; i < 150; i++) {
+                const tree = new THREE.Group();
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = 3;
+                if(Math.random() > 0.5) trunk.castShadow = true;
+                const foliage = new THREE.Mesh(foliageGeo, foliageMat);
+                foliage.position.y = 7;
+                if(Math.random() > 0.5) foliage.castShadow = true;
+                
+                tree.add(trunk);
+                tree.add(foliage);
+
+                const r = 30 + Math.random() * 200;
+                const theta = Math.random() * Math.PI * 2;
+                const tx = Math.cos(theta) * r;
+                const tz = Math.sin(theta) * r;
+
+                tree.position.set(tx, 0, tz);
+                activeMapObjects.add(tree);
+                addCollider(trunk);
+            }
+        };
+
         const createTower = () => {
             const tower = new THREE.Group();
             tower.position.set(0, 0, 0);
@@ -1226,7 +1283,7 @@
             activeMapObjects.add(tower);
         };
 
-        const createEnvironment = () => {
+        const createForestMap = () => {
             const grassGeo = new THREE.PlaneGeometry(1000, 1000);
             const grassMat = new THREE.MeshStandardMaterial({ 
                 map: grassTex.map, bumpMap: grassTex.bumpMap, bumpScale: 0.5, roughness: 0.9, metalness: 0.05 
@@ -1236,48 +1293,29 @@
             grass.receiveShadow = true;
             activeMapObjects.add(grass);
 
-            const asphaltGeo = new THREE.PlaneGeometry(60, 200);
-            const asphaltMat = new THREE.MeshStandardMaterial({ 
-                map: asphaltTex.map, bumpMap: asphaltTex.bumpMap, bumpScale: 0.3, roughness: 0.8 
-            });
-            const road = new THREE.Mesh(asphaltGeo, asphaltMat);
-            road.rotation.x = -Math.PI / 2;
-            road.position.set(0, 0.02, 20);
-            road.receiveShadow = true;
-            activeMapObjects.add(road);
+            const trunkGeo = new THREE.CylinderGeometry(0.5, 0.8, 10, 5); 
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a4b22, roughness: 0.9 });
+            const foliageGeo = new THREE.ConeGeometry(4, 15, 6); 
+            const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e6a1e, roughness: 0.8 });
 
-            const lineGeo = new THREE.PlaneGeometry(0.8, 10);
-            const lineMat = new THREE.MeshBasicMaterial({ color: 0xdddd00 }); 
-            for (let i = -80; i <= 100; i += 30) {
-                const line = new THREE.Mesh(lineGeo, lineMat);
-                line.rotation.x = -Math.PI / 2;
-                line.position.set(0, 0.03, i);
-                activeMapObjects.add(line);
-            }
-
-            const trunkGeo = new THREE.CylinderGeometry(0.4, 0.6, 6, 5); 
-            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
-            const foliageGeo = new THREE.ConeGeometry(3, 8, 6); 
-            const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e8c1e, roughness: 0.8 }); 
-
-            for (let i = 0; i < 150; i++) {
+            for (let i = 0; i < 600; i++) {
                 const tree = new THREE.Group();
                 const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-                trunk.position.y = 3;
-                if(Math.random() > 0.5) trunk.castShadow = true;
+                trunk.position.y = 5;
                 const foliage = new THREE.Mesh(foliageGeo, foliageMat);
-                foliage.position.y = 7;
-                if(Math.random() > 0.5) foliage.castShadow = true;
-                
+                foliage.position.y = 12;
                 tree.add(trunk);
                 tree.add(foliage);
 
-                const r = 30 + Math.random() * 200;
-                const theta = Math.random() * Math.PI * 2;
-                const tx = Math.cos(theta) * r;
-                const tz = Math.sin(theta) * r;
+                const x = (Math.random() - 0.5) * 500;
+                const z = (Math.random() - 0.5) * 500;
+                if (Math.abs(x) < 10 && Math.abs(z - 35) < 10) continue;
 
-                tree.position.set(tx, 0, tz);
+                tree.position.set(x, 0, z);
+                if(Math.random() > 0.85) { 
+                    trunk.castShadow = true;
+                    foliage.castShadow = true;
+                }
                 activeMapObjects.add(tree);
                 addCollider(trunk);
             }
@@ -2411,7 +2449,6 @@
             droneState.lastRollEuler = currentEulerForTrick.z;
 
             if (isEasyMode) {
-                // --- FIXED: Angle calculation applies selected mode ---
                 const maxAngle = maxAngleMode === '180' ? Math.PI * 0.95 : Math.PI / 2.5; 
 
                 if (typeof droneState.easyYaw === 'undefined' || droneState.flightTime === 0) {
@@ -2851,7 +2888,7 @@
         });
 
         setupTouchControls();
-        loadMap(0);
+        loadMap(currentMapIndex); // Use the updated initial index
 
         let lastTime = performance.now();
         const animate = () => {
@@ -2898,7 +2935,7 @@
 
         window.onload = () => {
             toggleMode(); toggleMode(); 
-            toggleAngleMode(); toggleAngleMode(); // Initialize new mode properly
+            toggleAngleMode(); toggleAngleMode(); 
             animate();
         };
 
@@ -2907,4 +2944,3 @@
 </html>
 
 
-```
