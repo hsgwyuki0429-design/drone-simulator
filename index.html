@@ -1,0 +1,2910 @@
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>FPV Drone Acrobat Simulator</title>
+    <!-- Tailwind CSS for sleek UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Three.js for 3D engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Courier New', Courier, monospace;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; 
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #canvas-container canvas {
+            filter: saturate(1.15) contrast(1.15) brightness(0.95);
+        }
+        #noise-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.15),
+                rgba(0, 0, 0, 0.15) 1px,
+                transparent 1px,
+                transparent 2px
+            ), #111;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.05s ease;
+        }
+        #noise-overlay.active {
+            opacity: 0.95;
+            pointer-events: auto;
+            animation: staticNoise 0.2s infinite;
+        }
+        @keyframes staticNoise {
+            0% { background-position: 0 0; filter: contrast(1.2) brightness(1.2); }
+            50% { background-position: 10px 20px; filter: contrast(1.5) brightness(1.5); }
+            100% { background-position: -5px -10px; filter: contrast(1.1) brightness(1); }
+        }
+        .fpv-scanlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            z-index: 2;
+            pointer-events: none;
+        }
+        .vignette-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.6) 130%);
+            z-index: 3;
+            pointer-events: none;
+            transition: background 0.1s ease-out;
+        }
+        #ring-flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.85);
+            z-index: 4;
+            pointer-events: none;
+            opacity: 0;
+        }
+        
+        /* Floating Virtual Joystick UI */
+        .virtual-stick-base {
+            position: absolute;
+            width: 110px;
+            height: 110px;
+            background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.15) 100%);
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+        .virtual-stick-thumb {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: radial-gradient(circle, #00d2ff 20%, #006688 80%, #003344 100%);
+            border: 2px solid #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5), 0 0 10px rgba(0,210,255,0.6);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 51;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        /* Fixed Stick UI within Controller Panel */
+        .stick-bound {
+            width: 80px;
+            height: 80px;
+            background: radial-gradient(circle, #222 60%, #111 100%);
+            border: 4px solid #444;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8), 0 0 5px rgba(255,255,255,0.1);
+            touch-action: none;
+            transition: opacity 0.3s ease;
+        }
+        .stick-thumb {
+            width: 24px;
+            height: 24px;
+            background: radial-gradient(circle, #00d2ff 20%, #006688 80%, #003344 100%);
+            border: 2px solid #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5), 0 0 10px rgba(0,210,255,0.6);
+            transition: transform 0.05s ease-out;
+            pointer-events: none;
+        }
+
+        @media (max-height: 520px) {
+            .stick-bound { width: 65px; height: 65px; }
+            .stick-thumb { width: 20px; height: 20px; }
+        }
+
+        @media (max-width: 900px) and (orientation: landscape) {
+            #controller-panel { bottom: 2px !important; padding: 4px !important; }
+            #controller-title { display: none !important; }
+            .stick-label { display: none !important; }
+            .stick-bound { width: 60px !important; height: 60px !important; }
+            .stick-thumb { width: 18px !important; height: 18px !important; }
+            #center-buttons-area { gap: 0.25rem !important; }
+        }
+    </style>
+</head>
+<body class="relative">
+
+    <!-- Game Viewport -->
+    <div id="canvas-container"></div>
+    <!-- Initial state set to TPS mode (fpv-effect hidden) -->
+    <div class="fpv-scanlines" id="fpv-effect" style="display: none;"></div>
+    <div class="vignette-overlay" id="vignette"></div>
+    <div id="ring-flash"></div>
+
+    <!-- Virtual Joysticks (Floating on touch in FLOAT mode) -->
+    <div id="virtual-stick-left-base" class="virtual-stick-base"></div>
+    <div id="virtual-stick-left-thumb" class="virtual-stick-thumb"></div>
+    <div id="virtual-stick-right-base" class="virtual-stick-base"></div>
+    <div id="virtual-stick-right-thumb" class="virtual-stick-thumb"></div>
+
+    <!-- Minimap Radar -->
+    <canvas id="minimap" class="absolute top-24 right-6 z-10 w-28 h-28 bg-black/40 border border-zinc-700 rounded-full pointer-events-none hidden md:block opacity-80 backdrop-blur-sm shadow-xl" width="128" height="128"></canvas>
+
+    <!-- Course Clear UI -->
+    <div id="clear-overlay" class="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none opacity-0 transition-opacity duration-700">
+        <div id="clear-text" class="text-yellow-400 font-black text-6xl md:text-8xl tracking-widest drop-shadow-[0_0_20px_rgba(255,255,0,0.8)] transform scale-50 transition-transform duration-500 italic">EXCELLENT!</div>
+        <div id="clear-time" class="text-white text-3xl font-mono mt-6 bg-black/60 px-6 py-2 border-2 border-yellow-400 rounded-lg drop-shadow-2xl text-center">TIME: 00:00.00</div>
+    </div>
+
+    <!-- Training Panel -->
+    <div id="training-panel" class="absolute top-24 left-1/2 -translate-x-1/2 z-10 w-[90%] max-w-sm bg-black/85 backdrop-blur-md rounded-xl border border-purple-500/50 p-4 text-white hidden">
+        <div class="flex justify-between items-center border-b border-purple-900 pb-1.5 mb-2">
+            <span class="text-xs font-bold text-purple-400 flex items-center gap-1">
+                <i data-lucide="graduation-cap" class="w-4 h-4"></i> 操作特訓モード
+            </span>
+            <button id="next-trick-btn" class="text-[10px] bg-purple-800 hover:bg-purple-700 px-2 py-0.5 rounded text-purple-200 flex items-center gap-1">
+                次の技 <i data-lucide="chevron-right" class="w-3 h-3"></i>
+            </button>
+        </div>
+        <div class="text-sm font-bold text-yellow-300" id="trick-name">技名: バレルロール</div>
+        <div class="text-[11px] text-zinc-300 my-1" id="trick-desc">機体を左右に360度高速回転させる基本のアクロバット技。</div>
+        <div class="mt-2 bg-purple-950/40 border border-purple-800/40 p-2 rounded">
+            <div class="text-[10px] text-purple-300 font-bold mb-1">現在の指示：</div>
+            <div class="text-xs text-white font-bold leading-normal" id="trick-instruction">Wを上げて、高度10m以上まで上昇しろ！</div>
+        </div>
+        <div class="mt-2 text-[10px] text-purple-400/80 text-right" id="trick-progress">ステップ: 1/3</div>
+    </div>
+
+    <!-- Crash/Noise Screen -->
+    <div id="noise-overlay" class="flex flex-col items-center justify-center text-white">
+        <div class="text-red-600 font-bold text-4xl tracking-widest mb-4 animate-pulse">NO SIGNAL</div>
+        <div class="text-gray-400 text-lg mb-8 bg-black/50 p-2 border border-gray-600">CRASH DETECTED - VTX DISCONNECTED</div>
+        <button id="restart-btn" class="px-6 py-3 bg-red-600 hover:bg-red-500 font-bold tracking-wide rounded border-2 border-white transition transform hover:scale-105 active:scale-95 shadow-lg">
+            RECONNECT (R)
+        </button>
+    </div>
+
+    <!-- OSD (On-Screen Display) -->
+    <div class="absolute top-6 left-6 z-10 text-white font-mono text-sm tracking-wider drop-shadow-[0_2px_2px_rgba(0,0,0,1)] pointer-events-none">
+        <div class="flex items-center gap-2 mb-1">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping"></span>
+            <span class="font-bold">FPV REC 4K</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span id="osd-timer">STK 00:00:00</span>
+            <span id="osd-split" class="text-xs text-yellow-400 font-bold opacity-0 transition-opacity duration-300 drop-shadow-[0_1px_1px_rgba(0,0,0,1)]"></span>
+        </div>
+        <!-- Initial state set to EASY mode -->
+        <div>MODE: <span id="osd-mode" class="text-green-500 font-bold">EASY (ANGLE)</span></div>
+        <div>RINGS: <span id="osd-ring-diff" class="text-green-400 font-bold">NORMAL</span> <span id="osd-ring-count" class="text-yellow-400"></span></div>
+        <div id="osd-speed">SPD: 0.0 km/h</div>
+        <div id="osd-alt">ALT: 0.0 m</div>
+    </div>
+
+    <div class="absolute top-6 right-6 z-10 text-white font-mono text-sm tracking-wider text-right drop-shadow-[0_2px_2px_rgba(0,0,0,1)] pointer-events-none">
+        <div class="font-bold text-green-400">RSSI: 99%</div>
+        <div id="osd-battery">BAT: 16.8V (4S)</div>
+        <div id="osd-throttle">THR: 0%</div>
+        <div id="osd-controller-status" class="text-xs text-gray-400 mt-1">KEYBOARD ACTIVE</div>
+    </div>
+
+    <!-- Settings Toggle Button -->
+    <button id="toggle-settings-btn" class="absolute top-24 right-4 z-50 p-2.5 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-full border border-zinc-600 shadow-xl backdrop-blur-sm transition-all focus:outline-none md:top-4 md:right-1/2 md:translate-x-[200px]">
+        <i data-lucide="settings" class="w-5 h-5"></i>
+    </button>
+
+    <!-- Center Crosshair -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none opacity-60">
+        <div class="w-10 h-0.5 bg-green-400"></div>
+        <div class="w-0.5 h-10 bg-green-400 -mt-5 ml-[19px]"></div>
+        <div class="absolute -top-1 -left-1 w-[28px] h-[28px] border border-green-400 rounded-full"></div>
+    </div>
+
+    <!-- Bottom Dashboard: Controller Overlay -->
+    <div id="controller-panel" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-[95%] max-w-lg bg-zinc-900/90 backdrop-blur-md rounded-2xl border-2 border-zinc-700 p-3 shadow-2xl flex flex-col items-center transition-all duration-300">
+        <div id="controller-title" class="w-full flex justify-between items-center px-2 mb-2 text-[10px] text-zinc-500 font-bold border-b border-zinc-800 pb-1 transition-opacity duration-300">
+            <span>RADIOMASTER TX16S</span>
+            <span class="text-green-500 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> 2.4G ELRS
+            </span>
+        </div>
+
+        <div class="w-full flex justify-around items-center gap-2">
+            
+            <!-- Left Fixed Stick (Hidden in FLOAT mode) -->
+            <div class="flex flex-col items-center" id="left-stick-col" style="display: none;">
+                <div class="stick-bound rounded-full flex items-center justify-center relative" id="left-stick-area">
+                    <div class="absolute w-full h-[1px] bg-zinc-800 pointer-events-none"></div>
+                    <div class="absolute h-full w-[1px] bg-zinc-800 pointer-events-none"></div>
+                    <div id="left-fixed-thumb" class="stick-thumb rounded-full absolute" style="left: calc(50% - 12px); top: calc(50% - 12px);"></div>
+                </div>
+                <div class="stick-label text-[10px] text-zinc-400 mt-1 font-bold">THR / YAW</div>
+            </div>
+
+            <!-- Controller Settings / Buttons Block -->
+            <!-- Adjusted layout for 12 buttons -->
+            <div id="center-buttons-area" class="flex flex-col gap-1 text-center justify-center transition-opacity duration-300 w-full px-2">
+                <div class="grid grid-cols-6 gap-1 w-full max-w-[360px] mx-auto">
+                    <button id="sound-toggle-btn" class="px-1 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-[8px] rounded border border-amber-400 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="volume-2" class="w-2.5 h-2.5"></i> SOUND
+                    </button>
+                    <!-- Initial state set to EASY mode UI -->
+                    <button id="mode-toggle-btn" class="px-1 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold text-[8px] rounded border border-green-400 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="navigation" class="w-2.5 h-2.5"></i> MODE: EASY
+                    </button>
+                    <button id="sens-toggle-btn" class="px-1 py-1.5 bg-blue-700 hover:bg-blue-600 text-white font-bold text-[8px] rounded border border-blue-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="mouse-pointer-2" class="w-2.5 h-2.5"></i> SENS
+                    </button>
+                    <button id="accel-toggle-btn" class="px-1 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white font-bold text-[8px] rounded border border-indigo-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="zap" class="w-2.5 h-2.5"></i> ACCEL
+                    </button>
+                    <button id="stick-toggle-btn" class="px-1 py-1.5 bg-pink-700 hover:bg-pink-600 text-white font-bold text-[8px] rounded border border-pink-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="move" class="w-2.5 h-2.5"></i> STK: FLOAT
+                    </button>
+
+                    <button id="dmg-toggle-btn" class="px-1 py-1.5 bg-red-700 hover:bg-red-600 text-white font-bold text-[8px] rounded border border-red-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="alert-triangle" class="w-2.5 h-2.5"></i> CRASH
+                    </button>
+                    <button id="training-toggle-btn" class="px-1 py-1.5 bg-purple-700 hover:bg-purple-600 text-white font-bold text-[8px] rounded border border-purple-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="graduation-cap" class="w-2.5 h-2.5"></i> TRN
+                    </button>
+                    <button id="difficulty-toggle-btn" class="px-1 py-1.5 bg-green-700 hover:bg-green-600 text-white font-bold text-[8px] rounded border border-green-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="shield" class="w-2.5 h-2.5"></i> RINGS
+                    </button>
+                    <button id="view-toggle-btn" class="px-1 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-[8px] rounded border border-cyan-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="eye" class="w-2.5 h-2.5"></i> VIEW
+                    </button>
+                    <button id="map-toggle-btn" class="px-1 py-1.5 bg-orange-700 hover:bg-orange-600 text-white font-bold text-[8px] rounded border border-orange-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="map" class="w-2.5 h-2.5"></i> MAP
+                    </button>
+                    <button id="gfx-toggle-btn" class="px-1 py-1.5 bg-slate-700 hover:bg-slate-600 text-white font-bold text-[8px] rounded border border-slate-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="monitor" class="w-2.5 h-2.5"></i> GFX: HIGH
+                    </button>
+                    <!-- --- NEW: Angle Mode Toggle Button --- -->
+                    <button id="angle-toggle-btn" class="px-1 py-1.5 bg-violet-700 hover:bg-violet-600 text-white font-bold text-[8px] rounded border border-violet-500 transition flex items-center justify-center gap-1 shadow-md">
+                        <i data-lucide="refresh-cw" class="w-2.5 h-2.5"></i> ANG: 180
+                    </button>
+                </div>
+                <button id="how-to-play-btn" class="mt-1.5 px-1 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-[8px] rounded border border-zinc-600 transition flex items-center justify-center gap-1 shadow-md w-full max-w-[360px] mx-auto">
+                    <i data-lucide="help-circle" class="w-2.5 h-2.5"></i> HOW TO PLAY / TUTORIAL
+                </button>
+            </div>
+
+            <!-- Right Fixed Stick (Hidden in FLOAT mode) -->
+            <div class="flex flex-col items-center" id="right-stick-col" style="display: none;">
+                <div class="stick-bound rounded-full flex items-center justify-center relative" id="right-stick-area">
+                    <div class="absolute w-full h-[1px] bg-zinc-800 pointer-events-none"></div>
+                    <div class="absolute h-full w-[1px] bg-zinc-800 pointer-events-none"></div>
+                    <div id="right-fixed-thumb" class="stick-thumb rounded-full absolute" style="left: calc(50% - 12px); top: calc(50% - 12px);"></div>
+                </div>
+                <div class="stick-label text-[10px] text-zinc-400 mt-1 font-bold">PITCH / ROLL</div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Interactive Help Modal -->
+    <div id="help-modal" class="absolute inset-0 bg-black/95 z-50 flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border-2 border-zinc-700 rounded-xl p-6 max-w-md w-full text-white overflow-y-auto max-h-[90vh]">
+            <h2 class="text-xl font-bold text-orange-500 mb-4 border-b border-zinc-800 pb-2 flex items-center gap-2">
+                <i data-lucide="compass" class="w-6 h-6 text-orange-500"></i> 操作チュートリアル
+            </h2>
+            <div class="space-y-3 text-sm text-zinc-300">
+                <p class="text-xs bg-zinc-800 p-2 border border-zinc-700 text-zinc-400 rounded leading-relaxed">
+                    本シミュレータは、実際のドローン操作を再現しています。<br>
+                    <strong>MODEボタン / Eキー</strong>で「EASY(ANGLE)モード」と「ACRO(RATE)モード」を切り替えられます。<br>
+                    初心者の方は、スティックを離すと水平に戻るEASYモードをおすすめします。<br>
+                    <br>
+                    <span class="text-blue-400 font-bold block mb-1">【ホバリング機能】</span>
+                    スティックまたはキー（W, S）から手を離したニュートラル時には、<strong>重力と推力が釣り合ってその場で自動的にホバリング</strong>します。<br>
+                    <br>
+                    <span class="text-green-400 font-bold block mb-1">【初心者向け：前に直進するコツ】</span>
+                    1. <strong>Wキー</strong>を少し押して機体を浮かせます。<br>
+                    2. <strong>↑キー(ピッチ)</strong> を押し続けて、機体を前に傾けます。<br>
+                    3. 前に傾くと高度が下がるので、<strong>Wキーを押し込んで推力をプラス</strong>します。<br>
+                    4. 機体の前傾(↑) ＋ 推力(W) の組み合わせで、斜め前にビュン！と安定して直進します。
+                </p>
+                <div>
+                    <span class="font-bold text-white block mb-1">■ スマホでの操作:</span>
+                    <ul class="list-disc list-inside space-y-1 pl-1 text-xs">
+                        <li class="text-pink-400">★ <strong>STICKボタン</strong> で「FLOAT（画面どこでも操作）」と「FIXED（下部固定スティック）」を切り替え可能！</li>
+                        <li><strong>画面左側（左スティック）</strong> : スロットル / ヨー (上下で高度調整、左右でヨー旋回)</li>
+                        <li><strong>画面右側（右スティック）</strong> : ピッチ / ロール (前後左右に機体を傾ける)</li>
+                        <li class="text-yellow-400">★ 触れたその場が中心になるため、指を見なくても滑らかに操縦可能！</li>
+                        <li class="text-yellow-400">★ 視界確保のため、<strong>FLOAT操作中はUIボタンが透明にフェードアウト</strong>します。</li>
+                    </ul>
+                </div>
+                <div>
+                    <span class="font-bold text-white block mb-1">■ キーボード操作:</span>
+                    <ul class="list-disc list-inside space-y-1 pl-1 text-xs">
+                        <li><kbd class="px-1 bg-zinc-700 text-white rounded">W</kbd> / <kbd class="px-1 bg-zinc-700 text-white rounded">S</kbd> : スロットル</li>
+                        <li><kbd class="px-1 bg-zinc-700 text-white rounded">A</kbd> / <kbd class="px-1 bg-zinc-700 text-white rounded">D</kbd> : ヨー (左・右旋回)</li>
+                        <li><kbd class="px-1 bg-zinc-700 text-white rounded">↑</kbd> / <kbd class="px-1 bg-zinc-700 text-white rounded">↓</kbd> : ピッチ (前進 / 後退)</li>
+                        <li><kbd class="px-1 bg-zinc-700 text-white rounded">←</kbd> / <kbd class="px-1 bg-zinc-700 text-white rounded">→</kbd> : ロール (左移動 / 右移動)</li>
+                        <li>各種ボタン操作： <br>
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">E</kbd>(モード), 
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">F</kbd>(スティック), 
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">V</kbd>(視点), 
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">M</kbd>(マップ), <br>
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">L</kbd>(難易度), 
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">K</kbd>(加速), 
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">C</kbd>(感度), 
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">B</kbd>(ダメージ),
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">T</kbd>(特訓), 
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">R</kbd>(復帰),
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">G</kbd>(画質),
+                            <kbd class="px-1 bg-zinc-700 text-white rounded">P</kbd>(角度)</li>
+                    </ul>
+                </div>
+                <div class="pt-4 border-t border-zinc-800 flex justify-end">
+                    <button id="close-help-btn" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded transition">
+                        テイクオフ！
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Web Audio & Core Logic Script -->
+    <script>
+        lucide.createIcons();
+
+        // Physics Config
+        const config = {
+            gravity: 18.0,          
+            airResistance: 0.12,  
+            maxAngularSpeed: 7.0,   
+            stickSensitivity: 0.08, 
+            centerReturnSpeed: 0.15 
+        };
+
+        const droneState = {
+            position: new THREE.Vector3(0, 1.5, 35), 
+            velocity: new THREE.Vector3(0, 0, 0),
+            quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0)), 
+            targetThrottle: -0.2, 
+            targetYaw: 0.0,
+            targetPitch: 0.0,
+            targetRoll: 0.0,
+            throttle: -0.2,
+            yaw: 0,
+            pitch: 0,
+            roll: 0,
+            isCrashed: false,
+            flightTime: 0,
+            rollAccumulator: 0,
+            lastRollEuler: 0
+        };
+
+        const mapConfigs = [
+            { name: "TOWER", wind: new THREE.Vector3(0, 0, 0) },
+            { name: "FOREST", wind: new THREE.Vector3(1.5, 0, 0.5) },
+            { name: "CITY", wind: new THREE.Vector3(-1.0, 0, 1.0) },
+            { name: "NEON", wind: new THREE.Vector3(0, 0, 0) },
+            { name: "EUROPE", wind: new THREE.Vector3(0.5, 0, -1.0) },
+            { name: "RACE", wind: new THREE.Vector3(0, 0, 0) },
+            { name: "GIANT SCHOOL", wind: new THREE.Vector3(0.5, 0.5, 0.2) } 
+        ];
+        let activeMapConfig = mapConfigs[0];
+        let lastRingTime = 0;
+
+        const leftBase = document.getElementById('virtual-stick-left-base');
+        const leftThumb = document.getElementById('virtual-stick-left-thumb');
+        const rightBase = document.getElementById('virtual-stick-right-base');
+        const rightThumb = document.getElementById('virtual-stick-right-thumb');
+
+        const leftFixedThumb = document.getElementById('left-fixed-thumb');
+        const rightFixedThumb = document.getElementById('right-fixed-thumb');
+        const leftFixedArea = document.getElementById('left-stick-area');
+        const rightFixedArea = document.getElementById('right-stick-area');
+
+        const noiseOverlay = document.getElementById('noise-overlay');
+        const restartBtn = document.getElementById('restart-btn');
+        const soundToggleBtn = document.getElementById('sound-toggle-btn');
+        const howToPlayBtn = document.getElementById('how-to-play-btn');
+        const helpModal = document.getElementById('help-modal');
+        const closeHelpBtn = document.getElementById('close-help-btn');
+        const osdTimer = document.getElementById('osd-timer');
+        const osdSpeed = document.getElementById('osd-speed');
+        const osdAlt = document.getElementById('osd-alt');
+        const osdBattery = document.getElementById('osd-battery');
+        const osdThrottle = document.getElementById('osd-throttle');
+        const osdControllerStatus = document.getElementById('osd-controller-status');
+        const fpvEffect = document.getElementById('fpv-effect');
+        const clearOverlay = document.getElementById('clear-overlay');
+        const clearText = document.getElementById('clear-text');
+        const clearTimeUI = document.getElementById('clear-time');
+        const osdRingCount = document.getElementById('osd-ring-count');
+
+        let audioCtx = null;
+        let motorOsc1 = null;
+        let motorOsc2 = null;
+        let motorGain = null;
+        let ambientGain = null;
+        let noiseGen = null;
+        let noiseGain = null;
+        let audioEnabled = false;
+
+        let isTPS = true;
+        let currentMapIndex = 0;
+        let gamepadIndex = null;
+        let isEasyMode = true; 
+        let lastGamepadButton0 = false; 
+        let ringDifficulty = 'NORMAL'; 
+        let accelMultiplier = 1.0; 
+        let sensMultiplier = 1.0;  
+        let isTrainingActive = false; 
+        let currentTrickIndex = 0;
+        let currentTrickStep = 0;
+        let damageMode = 'CRASH'; 
+        let gfxMode = 'HIGH'; 
+        let maxAngleMode = '180'; 
+
+        let stickMode = 'FLOAT';
+        let isSettingsHidden = false;
+
+        const touchLeft = { active: false, id: null, startX: 0, startY: 0, x: 0, y: 0 };
+        const touchRight = { active: false, id: null, startX: 0, startY: 0, x: 0, y: 0 };
+        let maxDragRadius = Math.min(window.innerWidth, window.innerHeight) * 0.12; 
+        
+        let isUIFaded = false; 
+        let fovPunch = 0.0; 
+
+        let totalRings = 0;
+        let passedRings = 0;
+        let isCourseCleared = false;
+        let isRaceMode = false;
+        let cpuDrone = null;
+        let currentTargetRingIndex = 0;
+        let ringCombo = 0; 
+
+        // Spatial Grid for fast collisions
+        const spatialGrid = {
+            cellSize: 40,
+            cells: new Map(),
+            clear() { this.cells.clear(); },
+            insert(colData) {
+                const pos = colData.worldPos;
+                const r = colData.radius;
+                const minX = pos.x - r; const maxX = pos.x + r;
+                const minZ = pos.z - r; const maxZ = pos.z + r;
+                const startX = Math.floor(minX / this.cellSize);
+                const endX = Math.floor(maxX / this.cellSize);
+                const startZ = Math.floor(minZ / this.cellSize);
+                const endZ = Math.floor(maxZ / this.cellSize);
+                for (let x = startX; x <= endX; x++) {
+                    for (let z = startZ; z <= endZ; z++) {
+                        const key = `${x},${z}`;
+                        if (!this.cells.has(key)) this.cells.set(key, []);
+                        this.cells.get(key).push(colData);
+                    }
+                }
+            },
+            getNearby(x, z) {
+                const cx = Math.floor(x / this.cellSize);
+                const cz = Math.floor(z / this.cellSize);
+                const result = [];
+                const seen = new Set();
+                for (let ix = -1; ix <= 1; ix++) {
+                    for (let iz = -1; iz <= 1; iz++) {
+                        const items = this.cells.get(`${cx + ix},${cz + iz}`);
+                        if (items) {
+                            for (let i = 0; i < items.length; i++) {
+                                const item = items[i];
+                                if (!seen.has(item)) { seen.add(item); result.push(item); }
+                            }
+                        }
+                    }
+                }
+                return result;
+            }
+        };
+
+        const tricks = [
+            {
+                name: "バレルロール (Roll)",
+                desc: "左右どちらかに360度高速回転し、水平に戻る基本技。",
+                steps: [
+                    { instruction: "まずはWキーで上昇しろ！ (高度10m以上確保)", check: () => (droneState.position.y - 0.2) >= 10 },
+                    { instruction: "ロールキー（← または →）を限界まで倒し続けろ！", check: () => Math.abs(droneState.rollAccumulator) > Math.PI * 1.5 },
+                    { instruction: "機体の傾きをピタッと止めて水平に戻せ！", check: () => { const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ'); return Math.abs(euler.z) < 0.25 && Math.abs(euler.x) < 0.25 && Math.abs(droneState.rollAccumulator) > Math.PI * 1.8; } }
+                ]
+            },
+            {
+                name: "スプリットS (Split-S)",
+                desc: "180度反転（逆さま）した後、後ろに宙返りして急降下し方向転換する技。",
+                steps: [
+                    { instruction: "まずは十分な高度を確保しろ！ (高度25m以上)", check: () => (droneState.position.y - 0.2) >= 25 },
+                    { instruction: "ロール（← or →）を倒して逆さま(180度)にしろ！", check: () => { const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ'); return Math.abs(Math.abs(euler.z) - Math.PI) < 0.5; } },
+                    { instruction: "そのままピッチアップ（↓キー）を引いて宙返り急降下しろ！", check: () => droneState.pitch < -0.6 },
+                    { instruction: "機体を水平に戻して体勢を立て直せ！", check: () => { const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ'); return Math.abs(euler.z) < 0.25 && Math.abs(euler.x) < 0.25 && droneState.velocity.y > -5; } }
+                ]
+            },
+            {
+                name: "パワーループ (Power Loop)",
+                desc: "縦に巨大な円を描いて一回転し、元の位置に戻るダイナミックな技。",
+                steps: [
+                    { instruction: "Wキーを押してスピードを上げろ！ (40km/h以上)", check: () => (droneState.velocity.length() * 3.6) >= 40 },
+                    { instruction: "ピッチアップ（↓キー）を限界まで引き続けろ！", check: () => droneState.pitch < -0.8 },
+                    { instruction: "ループの頂点(逆さま)を越え、さらに引き続けて一回転しろ！", check: () => { const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ'); return Math.abs(euler.x) < 0.5 && Math.abs(euler.z) < 0.5; } },
+                    { instruction: "スロットルを調整し、高度を安定させて水平飛行に戻せ！", check: () => Math.abs(droneState.velocity.y) < 3.0 }
+                ]
+            },
+            {
+                name: "ビル・ダイブ (Dive)",
+                desc: "建造物の壁面すれすれを、真下を向いたまま垂直急降下するプロの技。",
+                steps: [
+                    { instruction: "鉄塔やビルの近くで高度を限界まで上げろ！ (高度50m以上)", check: () => (droneState.position.y - 0.2) >= 50 },
+                    { instruction: "ピッチ前傾（↑キー）を倒し続け、カメラを真下に向けろ！", check: () => { const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ'); return Math.abs(euler.x - (-Math.PI / 2)) < 0.4; } },
+                    { instruction: "スロットルをゼロ(Sキー)にして、一気に垂直急降下しろ！", check: () => droneState.throttle < -0.8 && droneState.velocity.y < -15 },
+                    { instruction: "地面に激突する前にピッチアップして水平に復帰しろ！", check: () => { const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ'); return (droneState.position.y - 0.2) < 15 && Math.abs(euler.x) < 0.4 && droneState.velocity.y > -5; } }
+                ]
+            }
+        ];
+
+        const playExcellentVoice = () => {
+            if ('speechSynthesis' in window) {
+                const msg = new SpeechSynthesisUtterance('Excellent!');
+                msg.lang = 'en-US';
+                msg.rate = 1.0;
+                msg.pitch = 1.2;
+                window.speechSynthesis.speak(msg);
+            }
+        };
+
+        const toggleView = () => {
+            isTPS = !isTPS;
+            droneModel.visible = isTPS;
+            fpvEffect.style.display = isTPS ? 'none' : 'block';
+        };
+
+        const toggleMap = () => {
+            currentMapIndex = (currentMapIndex + 1) % 7;
+            loadMap(currentMapIndex);
+        };
+
+        const toggleMode = () => {
+            isEasyMode = !isEasyMode;
+            const modeText = isEasyMode ? "EASY (ANGLE)" : "ACRO (RATE)";
+            const modeColor = isEasyMode ? "text-green-500" : "text-orange-500";
+            const osdMode = document.getElementById('osd-mode');
+            osdMode.innerText = modeText;
+            osdMode.className = `${modeColor} font-bold`;
+            
+            const modeBtn = document.getElementById('mode-toggle-btn');
+            if (isEasyMode) {
+                modeBtn.innerHTML = `<i data-lucide="navigation" class="w-2.5 h-2.5"></i> MODE: EASY`;
+                modeBtn.className = "px-1 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold text-[8px] rounded border border-green-400 transition flex items-center justify-center gap-1 shadow-md";
+            } else {
+                modeBtn.innerHTML = `<i data-lucide="navigation" class="w-2.5 h-2.5"></i> MODE: ACRO`;
+                modeBtn.className = "px-1 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-[8px] rounded border border-emerald-500 transition flex items-center justify-center gap-1 shadow-md";
+            }
+            lucide.createIcons({ root: modeBtn });
+
+            if (isEasyMode) {
+                droneState.pitch = 0;
+                droneState.roll = 0;
+            }
+        };
+
+        const toggleStickMode = () => {
+            stickMode = stickMode === 'FLOAT' ? 'FIXED' : 'FLOAT';
+            
+            const btn = document.getElementById('stick-toggle-btn');
+            const leftCol = document.getElementById('left-stick-col');
+            const rightCol = document.getElementById('right-stick-col');
+            
+            touchLeft.active = false; touchLeft.id = null; touchLeft.x = 0; touchLeft.y = 0;
+            touchRight.active = false; touchRight.id = null; touchRight.x = 0; touchRight.y = 0;
+            leftBase.style.opacity = '0'; leftThumb.style.opacity = '0';
+            rightBase.style.opacity = '0'; rightThumb.style.opacity = '0';
+            
+            if (stickMode === 'FLOAT') {
+                btn.innerHTML = `<i data-lucide="move" class="w-2.5 h-2.5"></i> STK: FLOAT`;
+                btn.className = "px-1 py-1.5 bg-pink-700 hover:bg-pink-600 text-white font-bold text-[8px] rounded border border-pink-500 transition flex items-center justify-center gap-1 shadow-md";
+                leftCol.style.display = 'none';
+                rightCol.style.display = 'none';
+            } else {
+                btn.innerHTML = `<i data-lucide="circle-dot" class="w-2.5 h-2.5"></i> STK: FIXED`;
+                btn.className = "px-1 py-1.5 bg-rose-700 hover:bg-rose-600 text-white font-bold text-[8px] rounded border border-rose-500 transition flex items-center justify-center gap-1 shadow-md";
+                leftCol.style.display = 'flex';
+                rightCol.style.display = 'flex';
+                
+                const panel = document.getElementById('controller-panel');
+                if (!isSettingsHidden) {
+                    panel.classList.add('bg-zinc-900/90', 'backdrop-blur-md', 'border-zinc-700', 'shadow-2xl', 'border-2');
+                    panel.classList.remove('bg-transparent', 'border-transparent', 'shadow-none', 'pointer-events-none');
+                }
+                isUIFaded = false;
+            }
+            lucide.createIcons({ root: btn });
+        };
+
+        const toggleDamageMode = () => {
+            damageMode = damageMode === 'CRASH' ? 'BOUNCE' : 'CRASH';
+            const btn = document.getElementById('dmg-toggle-btn');
+            if (damageMode === 'CRASH') {
+                btn.innerHTML = `<i data-lucide="alert-triangle" class="w-2.5 h-2.5"></i> CRASH`;
+                btn.className = "px-1 py-1.5 bg-red-700 hover:bg-red-600 text-white font-bold text-[8px] rounded border border-red-500 transition flex items-center justify-center gap-1 shadow-md";
+            } else {
+                btn.innerHTML = `<i data-lucide="shield-check" class="w-2.5 h-2.5"></i> BOUNCE`;
+                btn.className = "px-1 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white font-bold text-[8px] rounded border border-yellow-400 transition flex items-center justify-center gap-1 shadow-md";
+            }
+            lucide.createIcons({ root: btn });
+        };
+
+        const toggleSettingsBtn = document.getElementById('toggle-settings-btn');
+        if (toggleSettingsBtn) {
+            toggleSettingsBtn.addEventListener('click', () => {
+                isSettingsHidden = !isSettingsHidden;
+                const panel = document.getElementById('controller-panel');
+                const buttonsArea = document.getElementById('center-buttons-area');
+                const titleArea = document.getElementById('controller-title');
+                
+                if (isSettingsHidden) {
+                    buttonsArea.style.display = 'none';
+                    titleArea.style.display = 'none';
+                    panel.classList.remove('bg-zinc-900/90', 'backdrop-blur-md', 'border-zinc-700', 'shadow-2xl', 'border-2');
+                    panel.classList.add('bg-transparent', 'border-transparent', 'shadow-none');
+                    toggleSettingsBtn.innerHTML = `<i data-lucide="settings-2" class="w-5 h-5 text-gray-500"></i>`;
+                } else {
+                    buttonsArea.style.display = 'flex';
+                    titleArea.style.display = 'flex';
+                    if (!isUIFaded || stickMode === 'FIXED') {
+                        panel.classList.add('bg-zinc-900/90', 'backdrop-blur-md', 'border-zinc-700', 'shadow-2xl', 'border-2');
+                        panel.classList.remove('bg-transparent', 'border-transparent', 'shadow-none');
+                    }
+                    toggleSettingsBtn.innerHTML = `<i data-lucide="settings" class="w-5 h-5"></i>`;
+                }
+                lucide.createIcons({ root: toggleSettingsBtn });
+            });
+        }
+
+        const toggleAngleMode = () => {
+            maxAngleMode = maxAngleMode === '180' ? 'NORMAL' : '180';
+            const btn = document.getElementById('angle-toggle-btn');
+            if (btn) {
+                if (maxAngleMode === '180') {
+                    btn.innerHTML = `<i data-lucide="refresh-cw" class="w-2.5 h-2.5"></i> ANG: 180`;
+                    btn.className = "px-1 py-1.5 bg-violet-700 hover:bg-violet-600 text-white font-bold text-[8px] rounded border border-violet-500 transition flex items-center justify-center gap-1 shadow-md";
+                } else {
+                    btn.innerHTML = `<i data-lucide="arrow-up-right" class="w-2.5 h-2.5"></i> ANG: NRM`;
+                    btn.className = "px-1 py-1.5 bg-fuchsia-700 hover:bg-fuchsia-600 text-white font-bold text-[8px] rounded border border-fuchsia-500 transition flex items-center justify-center gap-1 shadow-md";
+                }
+                lucide.createIcons({ root: btn });
+            }
+        };
+
+        const angleToggleBtn = document.getElementById('angle-toggle-btn');
+        if (angleToggleBtn) {
+            angleToggleBtn.addEventListener('click', toggleAngleMode);
+        }
+
+        document.getElementById('view-toggle-btn').addEventListener('click', toggleView);
+        document.getElementById('map-toggle-btn').addEventListener('click', toggleMap);
+        document.getElementById('mode-toggle-btn').addEventListener('click', toggleMode);
+        document.getElementById('stick-toggle-btn').addEventListener('click', toggleStickMode);
+        document.getElementById('dmg-toggle-btn').addEventListener('click', toggleDamageMode);
+
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            keys[key] = true;
+            if (key === 'r') resetDrone();
+            if (key === 'v') toggleView();
+            if (key === 'm') toggleMap();
+            if (key === 'l') cycleRingDifficulty();
+            if (key === 'k') cycleAccel();
+            if (key === 'c') cycleSens(); 
+            if (key === 't') toggleTraining();
+            if (key === 'e') toggleMode();
+            if (key === 'f') toggleStickMode();
+            if (key === 'b') toggleDamageMode();
+            if (key === 'g') cycleGfx(); 
+            if (key === 'p') toggleAngleMode();
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x5ca5ff); 
+        scene.fog = new THREE.FogExp2(0xa3b5c6, 0.0025); 
+
+        const camera = new THREE.PerspectiveCamera(125, window.innerWidth / window.innerHeight, 0.1, 1500); 
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0; 
+        renderer.outputEncoding = THREE.sRGBEncoding; 
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const applyGfx = () => {
+            const canvas = renderer.domElement;
+            if (gfxMode === 'HIGH') {
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+                canvas.style.imageRendering = 'auto';
+            } else if (gfxMode === 'MID') {
+                renderer.setPixelRatio(0.6);
+                canvas.style.imageRendering = 'auto';
+            } else if (gfxMode === 'RETRO') {
+                renderer.setPixelRatio(0.2);
+                canvas.style.imageRendering = 'pixelated';
+            }
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        };
+
+        const cycleGfx = () => {
+            if (gfxMode === 'HIGH') gfxMode = 'MID';
+            else if (gfxMode === 'MID') gfxMode = 'RETRO';
+            else gfxMode = 'HIGH';
+            applyGfx();
+            updateGfxUI();
+        };
+
+        const updateGfxUI = () => {
+            const btn = document.getElementById('gfx-toggle-btn');
+            if (btn) {
+                btn.innerHTML = `<i data-lucide="monitor" class="w-2.5 h-2.5"></i> GFX: ${gfxMode}`;
+                lucide.createIcons({ root: btn });
+            }
+        };
+
+        const gfxToggleBtn = document.getElementById('gfx-toggle-btn');
+        if (gfxToggleBtn) {
+            gfxToggleBtn.addEventListener('click', cycleGfx);
+        }
+
+        const createSkybox = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            const grad = ctx.createLinearGradient(0, 0, 0, 512);
+            grad.addColorStop(0, '#1a365d'); 
+            grad.addColorStop(0.48, '#6ea1d4'); 
+            grad.addColorStop(0.5, '#a3b5c6'); 
+            grad.addColorStop(0.52, '#505050'); 
+            grad.addColorStop(1, '#111111'); 
+
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 1024, 512);
+
+            const sunX = 1024 * 0.8; 
+            const sunY = 512 * 0.3;
+            const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 50);
+            sunGrad.addColorStop(0, 'rgba(255,255,255,1)');
+            sunGrad.addColorStop(0.2, 'rgba(255,240,200,0.8)');
+            sunGrad.addColorStop(1, 'rgba(255,240,200,0)');
+            ctx.fillStyle = sunGrad;
+            ctx.fillRect(0, 0, 1024, 512);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.mapping = THREE.EquirectangularReflectionMapping;
+            return tex;
+        };
+        const envMap = createSkybox();
+        scene.background = envMap;
+        scene.environment = envMap;
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); 
+        scene.add(ambientLight);
+
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.4); 
+        hemiLight.position.set(0, 200, 0);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.5); 
+        dirLight.position.set(100, 150, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.radius = 2.5; 
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 400;
+        const d = 120;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        const generateTextureSet = (size, baseR, baseG, baseB, varRGB, repeat) => {
+            const canvas = document.createElement('canvas');
+            const bumpCanvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            bumpCanvas.width = size; bumpCanvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const bCtx = bumpCanvas.getContext('2d');
+            
+            ctx.fillStyle = `rgb(${baseR},${baseG},${baseB})`;
+            ctx.fillRect(0, 0, size, size);
+
+            for (let i = 0; i < 200; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.05})`;
+                ctx.beginPath();
+                ctx.arc(Math.random()*size, Math.random()*size, Math.random()*40, 0, Math.PI*2);
+                ctx.fill();
+                
+                ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.05})`;
+                ctx.beginPath();
+                ctx.arc(Math.random()*size, Math.random()*size, Math.random()*40, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            for(let i=0; i<100; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.03})`;
+                ctx.fillRect(Math.random()*size, 0, 1 + Math.random()*3, size);
+            }
+
+            const imgData = ctx.getImageData(0, 0, size, size);
+            const bImgData = bCtx.createImageData(size, size);
+            
+            for (let i = 0; i < imgData.data.length; i += 4) {
+                const noise = (Math.random() - 0.5) * varRGB;
+                const r = Math.max(0, Math.min(255, imgData.data[i] + noise));
+                const g = Math.max(0, Math.min(255, imgData.data[i+1] + noise));
+                const b = Math.max(0, Math.min(255, imgData.data[i+2] + noise));
+                imgData.data[i] = r; imgData.data[i+1] = g; imgData.data[i+2] = b;
+                
+                const brightness = (r + g + b) / 3;
+                bImgData.data[i] = brightness;
+                bImgData.data[i+1] = brightness;
+                bImgData.data[i+2] = brightness;
+                bImgData.data[i+3] = 255;
+            }
+            ctx.putImageData(imgData, 0, 0);
+            bCtx.putImageData(bImgData, 0, 0);
+
+            ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+            ctx.lineWidth = 2;
+            for(let i=0; i<=size; i+=size/4) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, size); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
+            }
+
+            const map = new THREE.CanvasTexture(canvas);
+            const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+            map.wrapS = map.wrapT = THREE.RepeatWrapping;
+            bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+            map.repeat.set(repeat, repeat);
+            bumpMap.repeat.set(repeat, repeat);
+            return { map, bumpMap };
+        };
+
+        const generateBuildingPBRTextures = (baseHex, windowHex) => {
+            const size = 512;
+            const cMap = document.createElement('canvas'); cMap.width = size; cMap.height = size;
+            const rMap = document.createElement('canvas'); rMap.width = size; rMap.height = size;
+            const mMap = document.createElement('canvas'); mMap.width = size; mMap.height = size;
+            const ctx = cMap.getContext('2d');
+            const rCtx = rMap.getContext('2d');
+            const mCtx = mMap.getContext('2d');
+
+            const grad = ctx.createLinearGradient(0, size, 0, 0);
+            grad.addColorStop(0, '#111111'); 
+            grad.addColorStop(0.3, baseHex);
+            grad.addColorStop(1, baseHex);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, size, size);
+            
+            rCtx.fillStyle = '#bbbbbb'; 
+            rCtx.fillRect(0, 0, size, size);
+            mCtx.fillStyle = '#111111'; 
+            mCtx.fillRect(0, 0, size, size);
+
+            for(let i=0; i<300; i++) {
+                ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.1})`;
+                ctx.beginPath();
+                ctx.arc(Math.random()*size, Math.random()*size, 10+Math.random()*40, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx.lineWidth = 2;
+            for(let i=0; i<=size; i+=64) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, size); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(size, i); ctx.stroke();
+            }
+
+            for(let y = 10; y < size; y += 64) {
+                for(let x = 10; x < size; x += 64) {
+                    if(Math.random() > 0.4) {
+                        ctx.fillStyle = windowHex;
+                        ctx.fillRect(x + 10, y + 10, 30, 40);
+                        
+                        ctx.strokeStyle = '#222';
+                        ctx.strokeRect(x + 10, y + 10, 30, 40);
+
+                        rCtx.fillStyle = '#111111'; 
+                        rCtx.fillRect(x + 10, y + 10, 30, 40);
+                        mCtx.fillStyle = '#ffffff'; 
+                        mCtx.fillRect(x + 10, y + 10, 30, 40);
+                    } else {
+                        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                        ctx.fillRect(x + 10, y + 10, 30, 40);
+                    }
+                }
+            }
+            const map = new THREE.CanvasTexture(cMap); map.wrapS = map.wrapT = THREE.RepeatWrapping;
+            const roughnessMap = new THREE.CanvasTexture(rMap); roughnessMap.wrapS = roughnessMap.wrapT = THREE.RepeatWrapping;
+            const metalnessMap = new THREE.CanvasTexture(mMap); metalnessMap.wrapS = metalnessMap.wrapT = THREE.RepeatWrapping;
+            return { map, roughnessMap, metalnessMap };
+        };
+
+        const createSchoolGroundTexture = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2048;
+            canvas.height = 2048;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = '#2f4f2f'; 
+            ctx.fillRect(0, 0, 2048, 2048);
+            
+            ctx.fillStyle = '#b89470'; ctx.fillRect(200, 200, 800, 600); 
+            ctx.fillStyle = '#4080ff'; ctx.fillRect(1200, 200, 500, 400); 
+            ctx.fillStyle = '#606060'; ctx.fillRect(200, 900, 1600, 400); 
+            ctx.fillStyle = '#8b5a2b'; ctx.fillRect(1200, 1400, 600, 500); 
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 60px "Courier New"';
+            ctx.textAlign = 'center';
+            ctx.fillText('SPORTS GROUND', 600, 500);
+            ctx.fillText('SWIMMING POOL', 1450, 400);
+            ctx.fillText('MAIN SCHOOL BUILDING', 1000, 1100);
+            ctx.fillText('GYMNASIUM', 1500, 1650);
+            ctx.fillText('GIANT SCHOOL MAP', 1024, 100);
+
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 4;
+            for(let i=0; i<=2048; i+=128) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 2048); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(2048, i); ctx.stroke();
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.ClampToEdgeWrapping;
+            tex.wrapT = THREE.ClampToEdgeWrapping;
+            return tex;
+        };
+
+        const grassTex = generateTextureSet(512, 85, 96, 64, 30, 60);
+        const asphaltTex = generateTextureSet(512, 50, 50, 50, 15, 40);
+        const stoneTex = generateTextureSet(512, 160, 155, 145, 30, 20); 
+        const bldg1Tex = generateBuildingPBRTextures('#666677', '#ffffcc');
+        const bldg2Tex = generateBuildingPBRTextures('#445566', '#aaddff');
+
+        const droneModel = new THREE.Group();
+        droneModel.visible = true; 
+        const dmBody = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.4), new THREE.MeshStandardMaterial({color: 0x333333}));
+        const dmArm1 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.05), new THREE.MeshStandardMaterial({color: 0x555555}));
+        dmArm1.rotation.y = Math.PI / 4;
+        const dmArm2 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.05), new THREE.MeshStandardMaterial({color: 0x555555}));
+        dmArm2.rotation.y = -Math.PI / 4;
+        droneModel.add(dmBody);
+        droneModel.add(dmArm1);
+        droneModel.add(dmArm2);
+        const propMatRed = new THREE.MeshBasicMaterial({color: 0xff0000, wireframe: true});
+        const propMatBlk = new THREE.MeshBasicMaterial({color: 0x222222, wireframe: true});
+        const propGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.05, 8);
+        const p1 = new THREE.Mesh(propGeo, propMatRed); p1.position.set(0.3, 0.05, -0.3);
+        const p2 = new THREE.Mesh(propGeo, propMatRed); p2.position.set(-0.3, 0.05, -0.3);
+        const p3 = new THREE.Mesh(propGeo, propMatBlk); p3.position.set(0.3, 0.05, 0.3);
+        const p4 = new THREE.Mesh(propGeo, propMatBlk); p4.position.set(-0.3, 0.05, 0.3);
+        droneModel.add(p1); droneModel.add(p2); droneModel.add(p3); droneModel.add(p4);
+        scene.add(droneModel);
+
+        const speedLinesGroup = new THREE.Group();
+        const lineGeo = new THREE.CylinderGeometry(0.02, 0.02, 8, 3);
+        const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.15 });
+        const speedLines = [];
+        for (let i = 0; i < 120; i++) {
+            const line = new THREE.Mesh(lineGeo, lineMat);
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 2 + Math.random() * 6;
+            line.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, -20 - Math.random() * 40);
+            line.rotation.x = Math.PI / 2; 
+            speedLinesGroup.add(line);
+            speedLines.push(line);
+        }
+        camera.add(speedLinesGroup); 
+        scene.add(camera);
+
+        const updateSpeedLines = (speed, deltaTime) => {
+            if (isTPS || speed < 15) {
+                speedLinesGroup.visible = false;
+                return;
+            }
+            speedLinesGroup.visible = true;
+            
+            const burst = (fovPunch > 0) ? (fovPunch * 0.02) : 0;
+            lineMat.opacity = Math.min(1.0, (speed - 15) * 0.015 + burst);
+            
+            speedLines.forEach(line => {
+                line.position.z += (speed * 0.5 + burst * 50) * deltaTime; 
+                if (line.position.z > 5) {
+                    line.position.z = -30 - Math.random() * 30;
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = 2 + Math.random() * 6;
+                    line.position.x = Math.cos(angle) * radius;
+                    line.position.y = Math.sin(angle) * radius;
+                }
+            });
+        };
+
+        let activeMapObjects = new THREE.Group();
+        scene.add(activeMapObjects);
+
+        let colliders = []; 
+        let rawColliderMeshes = [];
+
+        const addCollider = (...meshes) => {
+            meshes.forEach(m => rawColliderMeshes.push(m));
+        };
+
+        const clearMap = () => {
+            activeMapObjects.traverse((child) => {
+                if (child.isMesh) {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                        else child.material.dispose();
+                    }
+                }
+            });
+            scene.remove(activeMapObjects);
+            activeMapObjects = new THREE.Group();
+            scene.add(activeMapObjects);
+            
+            targetRings.forEach(ring => {
+                if (ring.geometry) ring.geometry.dispose();
+                if (ring.material) ring.material.dispose();
+                scene.remove(ring);
+            });
+            targetRings.length = 0;
+
+            if (cpuDrone) {
+                if (cpuDrone.geometry) cpuDrone.geometry.dispose();
+                if (cpuDrone.material) cpuDrone.material.dispose();
+                scene.remove(cpuDrone);
+                cpuDrone = null;
+            }
+
+            colliders.length = 0;
+            rawColliderMeshes.length = 0;
+            spatialGrid.clear();
+        };
+
+        const createTower = () => {
+            const tower = new THREE.Group();
+            tower.position.set(0, 0, 0);
+
+            const concreteMat = new THREE.MeshStandardMaterial({ 
+                map: stoneTex.map, 
+                bumpMap: stoneTex.bumpMap, 
+                bumpScale: 1.0, 
+                roughness: 0.9, 
+                metalness: 0.1,
+                color: 0xaaaaaa 
+            });
+            const darkConcreteMat = new THREE.MeshStandardMaterial({ 
+                map: stoneTex.map, 
+                bumpMap: stoneTex.bumpMap, 
+                bumpScale: 1.0, 
+                roughness: 0.9, 
+                metalness: 0.1,
+                color: 0x555555 
+            });
+
+            const baseFloorGeo = new THREE.CylinderGeometry(33, 33, 0.5, 32);
+            const baseFloor = new THREE.Mesh(baseFloorGeo, concreteMat);
+            baseFloor.position.y = 0.25;
+            baseFloor.receiveShadow = true;
+            tower.add(baseFloor);
+            addCollider(baseFloor);
+
+            const segments = 16;
+            const levels = 16; 
+            const levelHeight = 10; 
+
+            for (let i = 0; i < levels; i++) {
+                const yProgression = i / (levels - 1); 
+                const radius = 16 + 16 * Math.pow(1 - yProgression, 3);
+                const prevRadius = i === 0 ? radius : 16 + 16 * Math.pow(1 - ((i - 1) / (levels - 1)), 3);
+                
+                const tilt = Math.atan2(prevRadius - radius, levelHeight);
+                const panelWidth = 2 * radius * Math.tan(Math.PI / segments) + 1.0; 
+                const panelThickness = 3;
+
+                if (i === 11) { 
+                    for (let j = 0; j < segments; j++) {
+                        const angle = j * (Math.PI * 2 / segments);
+                        const depth = radius - 6; 
+                        if (depth > 0) {
+                            const floorPanelGeo = new THREE.BoxGeometry(panelWidth, 1.5, depth);
+                            const floorPanel = new THREE.Mesh(floorPanelGeo, darkConcreteMat);
+                            floorPanel.position.x = Math.sin(angle) * (radius - depth / 2);
+                            floorPanel.position.y = i * levelHeight;
+                            floorPanel.position.z = Math.cos(angle) * (radius - depth / 2);
+                            floorPanel.rotation.y = angle;
+                            floorPanel.castShadow = true;
+                            floorPanel.receiveShadow = true;
+                            tower.add(floorPanel);
+                            addCollider(floorPanel);
+                        }
+                    }
+                }
+
+                for (let j = 0; j < segments; j++) {
+                    if (i < 4) { 
+                        if (j === 0 || j === 1 || j === 15 || j === 7 || j === 8 || j === 9) {
+                            continue;
+                        }
+                    }
+
+                    let currentHeight = levelHeight;
+                    let yOffset = levelHeight / 2;
+                    if (i >= 4 && i < 11 && (j === 0 || j === 8)) {
+                        currentHeight = levelHeight - 2; 
+                        yOffset = currentHeight / 2;
+                    }
+
+                    const angle = j * (Math.PI * 2 / segments);
+                    
+                    const panelGeo = new THREE.BoxGeometry(panelWidth, currentHeight, panelThickness);
+                    const panel = new THREE.Mesh(panelGeo, concreteMat);
+
+                    panel.position.x = Math.sin(angle) * radius;
+                    panel.position.y = i * levelHeight + yOffset;
+                    panel.position.z = Math.cos(angle) * radius;
+
+                    panel.rotation.y = angle;
+                    panel.rotation.x = tilt;
+
+                    panel.castShadow = true;
+                    panel.receiveShadow = true;
+
+                    tower.add(panel);
+                    addCollider(panel);
+                }
+            }
+
+            activeMapObjects.add(tower);
+        };
+
+        const createEnvironment = () => {
+            const grassGeo = new THREE.PlaneGeometry(1000, 1000);
+            const grassMat = new THREE.MeshStandardMaterial({ 
+                map: grassTex.map, bumpMap: grassTex.bumpMap, bumpScale: 0.5, roughness: 0.9, metalness: 0.05 
+            });
+            const grass = new THREE.Mesh(grassGeo, grassMat);
+            grass.rotation.x = -Math.PI / 2;
+            grass.receiveShadow = true;
+            activeMapObjects.add(grass);
+
+            const asphaltGeo = new THREE.PlaneGeometry(60, 200);
+            const asphaltMat = new THREE.MeshStandardMaterial({ 
+                map: asphaltTex.map, bumpMap: asphaltTex.bumpMap, bumpScale: 0.3, roughness: 0.8 
+            });
+            const road = new THREE.Mesh(asphaltGeo, asphaltMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.set(0, 0.02, 20);
+            road.receiveShadow = true;
+            activeMapObjects.add(road);
+
+            const lineGeo = new THREE.PlaneGeometry(0.8, 10);
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xdddd00 }); 
+            for (let i = -80; i <= 100; i += 30) {
+                const line = new THREE.Mesh(lineGeo, lineMat);
+                line.rotation.x = -Math.PI / 2;
+                line.position.set(0, 0.03, i);
+                activeMapObjects.add(line);
+            }
+
+            const trunkGeo = new THREE.CylinderGeometry(0.4, 0.6, 6, 5); 
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 });
+            const foliageGeo = new THREE.ConeGeometry(3, 8, 6); 
+            const foliageMat = new THREE.MeshStandardMaterial({ color: 0x2e8c1e, roughness: 0.8 }); 
+
+            for (let i = 0; i < 150; i++) {
+                const tree = new THREE.Group();
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = 3;
+                if(Math.random() > 0.5) trunk.castShadow = true;
+                const foliage = new THREE.Mesh(foliageGeo, foliageMat);
+                foliage.position.y = 7;
+                if(Math.random() > 0.5) foliage.castShadow = true;
+                
+                tree.add(trunk);
+                tree.add(foliage);
+
+                const r = 30 + Math.random() * 200;
+                const theta = Math.random() * Math.PI * 2;
+                const tx = Math.cos(theta) * r;
+                const tz = Math.sin(theta) * r;
+
+                tree.position.set(tx, 0, tz);
+                activeMapObjects.add(tree);
+                addCollider(trunk);
+            }
+        };
+
+        const createCityMap = () => {
+            const floorGeo = new THREE.PlaneGeometry(1000, 1000);
+            const floorMat = new THREE.MeshStandardMaterial({ 
+                map: asphaltTex.map, bumpMap: asphaltTex.bumpMap, bumpScale: 0.3, roughness: 0.8 
+            });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            activeMapObjects.add(floor);
+
+            const buildingMat1 = new THREE.MeshPhysicalMaterial({ 
+                map: bldg1Tex.map, roughnessMap: bldg1Tex.roughnessMap, metalnessMap: bldg1Tex.metalnessMap, envMap: envMap, envMapIntensity: 1.0, clearcoat: 0.2 
+            });
+            const buildingMat2 = new THREE.MeshPhysicalMaterial({ 
+                map: bldg2Tex.map, roughnessMap: bldg2Tex.roughnessMap, metalnessMap: bldg2Tex.metalnessMap, envMap: envMap, envMapIntensity: 1.0, clearcoat: 0.2 
+            });
+            const bGeo = new THREE.BoxGeometry(1, 1, 1);
+
+            for (let i = 0; i < 300; i++) {
+                const w = 10 + Math.random() * 30;
+                const d = 10 + Math.random() * 30;
+                const h = 20 + Math.random() * 100;
+                
+                const mat = Math.random() > 0.5 ? buildingMat1 : buildingMat2;
+                const localMat = mat.clone();
+                localMat.map = mat.map.clone();
+                localMat.map.repeat.set(w/10, h/10);
+                localMat.roughnessMap = mat.roughnessMap.clone();
+                localMat.roughnessMap.repeat.set(w/10, h/10);
+                localMat.metalnessMap = mat.metalnessMap.clone();
+                localMat.metalnessMap.repeat.set(w/10, h/10);
+
+                const building = new THREE.Mesh(bGeo, localMat);
+                building.scale.set(w, h, d);
+                
+                const x = (Math.random() - 0.5) * 600;
+                const z = (Math.random() - 0.5) * 600;
+                if (Math.abs(x) < 20 && Math.abs(z - 35) < 20) continue; 
+                
+                building.position.set(x, h/2, z);
+                if(Math.random() > 0.6) building.castShadow = true;
+                building.receiveShadow = true;
+                activeMapObjects.add(building);
+                addCollider(building);
+            }
+        };
+
+        const createNeonMap = () => {
+            const gridGeo = new THREE.PlaneGeometry(1000, 1000, 50, 50);
+            const gridMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true });
+            const grid = new THREE.Mesh(gridGeo, gridMat);
+            grid.rotation.x = -Math.PI / 2;
+            activeMapObjects.add(grid);
+
+            const floorGeo = new THREE.PlaneGeometry(1000, 1000);
+            const floorMat = new THREE.MeshBasicMaterial({ color: 0x050510 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.y = -0.1;
+            activeMapObjects.add(floor);
+
+            const colors = [0x00ffff, 0xff00ff, 0x00ff00, 0xffff00];
+            const pGeo = new THREE.BoxGeometry(4, 1, 4);
+            for (let i = 0; i < 300; i++) {
+                const h = 10 + Math.random() * 80;
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                const pillarMat = new THREE.MeshBasicMaterial({ color: color, wireframe: true });
+                const pillar = new THREE.Mesh(pGeo, pillarMat);
+                pillar.scale.set(1, h, 1);
+                
+                const x = (Math.random() - 0.5) * 500;
+                const z = (Math.random() - 0.5) * 500;
+                if (Math.abs(x) < 15 && Math.abs(z - 35) < 15) continue;
+                
+                pillar.position.set(x, h/2, z);
+                activeMapObjects.add(pillar);
+                addCollider(pillar);
+            }
+        };
+
+        const createEuropeMap = () => {
+            const stoneGeo = new THREE.PlaneGeometry(1000, 1000);
+            const stoneMat = new THREE.MeshStandardMaterial({ 
+                map: stoneTex.map, bumpMap: stoneTex.bumpMap, bumpScale: 0.5, roughness: 0.9, metalness: 0.0 
+            });
+            const stone = new THREE.Mesh(stoneGeo, stoneMat);
+            stone.rotation.x = -Math.PI / 2;
+            stone.receiveShadow = true;
+            activeMapObjects.add(stone);
+
+            const wallColors = [0xf8ecb8, 0xe4c2a5, 0xd2b698, 0xab8a76, 0xd7cba3];
+            const roofMat = new THREE.MeshPhysicalMaterial({ color: 0xaa4a39, roughness: 0.7, clearcoat: 0.1 }); 
+            const darkStoneMat = new THREE.MeshStandardMaterial({ color: 0x6a6a6a, roughness: 0.8 });
+
+            const createHouse = (x, z, w, d, h, yRot) => {
+                const house = new THREE.Group();
+                const wallColor = wallColors[Math.floor(Math.random() * wallColors.length)];
+                const wallMat = new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.9 });
+                
+                const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+                body.position.y = h / 2;
+                body.castShadow = true;
+                body.receiveShadow = true;
+                
+                const roofH = h * 0.4;
+                const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.75, roofH, 4), roofMat);
+                roof.position.y = h + roofH / 2;
+                roof.rotation.y = Math.PI / 4;
+                roof.castShadow = true;
+                
+                house.add(body);
+                house.add(roof);
+                house.position.set(x, 0, z);
+                house.rotation.y = yRot;
+                activeMapObjects.add(house);
+                addCollider(body, roof);
+            };
+
+            const monBase = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 1, 16), darkStoneMat);
+            monBase.position.set(0, 0.5, 0);
+            activeMapObjects.add(monBase);
+            addCollider(monBase);
+            const monPillar = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.8, 8, 8), darkStoneMat);
+            monPillar.position.set(0, 4, 0);
+            activeMapObjects.add(monPillar);
+            addCollider(monPillar);
+
+            createHouse(0, -50, 20, 40, 25, 0); 
+            const tower = new THREE.Mesh(new THREE.BoxGeometry(10, 45, 10), new THREE.MeshStandardMaterial({color: 0xb29678, roughness: 0.9}));
+            tower.position.set(0, 22.5, -35);
+            tower.castShadow = true;
+            activeMapObjects.add(tower);
+            addCollider(tower);
+            const spire = new THREE.Mesh(new THREE.ConeGeometry(6, 20, 8), new THREE.MeshPhysicalMaterial({color: 0x4a6d5e, roughness: 0.6, metalness: 0.2})); 
+            spire.position.set(0, 55, -35);
+            activeMapObjects.add(spire);
+            addCollider(spire);
+
+            for (let i = 0; i < 250; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 25 + Math.random() * 200;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                
+                if (Math.abs(x) < 15 && z < 0) continue;
+                if (Math.abs(x) < 10 && Math.abs(z - 35) < 10) continue;
+
+                createHouse(x, z, 8 + Math.random()*6, 10 + Math.random()*8, 10 + Math.random()*15, Math.random() * Math.PI);
+            }
+        };
+
+        const createRaceMap = () => {
+            const trackGeo = new THREE.PlaneGeometry(1000, 1000);
+            const trackMat = new THREE.MeshStandardMaterial({ 
+                map: asphaltTex.map, bumpMap: asphaltTex.bumpMap, bumpScale: 0.3, color: 0x444444, roughness: 0.8 
+            });
+            const track = new THREE.Mesh(trackGeo, trackMat);
+            track.rotation.x = -Math.PI / 2;
+            track.receiveShadow = true;
+            activeMapObjects.add(track);
+
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            for(let i=-200; i<200; i+=20) {
+                const line = new THREE.Mesh(new THREE.PlaneGeometry(400, 0.5), lineMat);
+                line.rotation.x = -Math.PI/2;
+                line.position.set(0, 0.05, i);
+                activeMapObjects.add(line);
+            }
+
+            const obsMat = new THREE.MeshPhysicalMaterial({ color: 0x1166cc, roughness: 0.3, clearcoat: 0.4 });
+            const cylGeo = new THREE.CylinderGeometry(2, 2, 20, 8); 
+            for (let i=0; i<50; i++) {
+                const obs = new THREE.Mesh(cylGeo, obsMat);
+                obs.position.set((Math.random()-0.5)*150, 10, -Math.random()*300);
+                obs.castShadow = true;
+                activeMapObjects.add(obs);
+                addCollider(obs);
+            }
+        };
+
+        const createSchoolMap = () => {
+            const groundTex = createSchoolGroundTexture();
+            const floorGeo = new THREE.PlaneGeometry(10000, 10000);
+            const floorMat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.9 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            activeMapObjects.add(floor);
+
+            const bldgMat = new THREE.MeshPhysicalMaterial({ 
+                map: bldg1Tex.map, roughnessMap: bldg1Tex.roughnessMap, metalnessMap: bldg1Tex.metalnessMap, envMap: envMap, envMapIntensity: 1.0, color: 0xe0e0e0, clearcoat: 0.2
+            });
+            
+            const mainBldg = new THREE.Mesh(new THREE.BoxGeometry(6000, 800, 1500), bldgMat);
+            mainBldg.position.set(0, 400, 500); 
+            mainBldg.castShadow = true;
+            mainBldg.receiveShadow = true;
+            activeMapObjects.add(mainBldg);
+            addCollider(mainBldg);
+
+            const gymMat = new THREE.MeshStandardMaterial({ color: 0xc8a47e });
+            const gym = new THREE.Mesh(new THREE.CylinderGeometry(800, 800, 2000, 16, 1, false, 0, Math.PI), gymMat);
+            gym.rotation.set(0, 0, Math.PI / 2);
+            gym.position.set(2000, 0, -1000);
+            gym.castShadow = true;
+            activeMapObjects.add(gym);
+            addCollider(gym);
+
+            const poolWall = new THREE.Mesh(new THREE.BoxGeometry(1500, 50, 100), new THREE.MeshStandardMaterial({color: 0xaaddff}));
+            poolWall.position.set(-2000, 25, -1500);
+            activeMapObjects.add(poolWall);
+            addCollider(poolWall);
+
+            const smallBldgGeo = new THREE.BoxGeometry(1, 1, 1);
+            for(let i=0; i<40; i++) {
+                const w = 400 + Math.random() * 800;
+                const d = 400 + Math.random() * 800;
+                const h = 200 + Math.random() * 600;
+                const b = new THREE.Mesh(smallBldgGeo, bldgMat);
+                b.scale.set(w, h, d);
+                
+                const x = (Math.random() - 0.5) * 8000;
+                const z = (Math.random() - 0.5) * 8000;
+                if (Math.abs(x) < 3000 && Math.abs(z) < 1500) continue; 
+                
+                b.position.set(x, h/2, z);
+                b.castShadow = true;
+                b.receiveShadow = true;
+                activeMapObjects.add(b);
+                addCollider(b);
+            }
+        };
+
+        const initCPUDrone = () => {
+            const geo = new THREE.BoxGeometry(1.0, 0.3, 1.0);
+            const mat = new THREE.MeshStandardMaterial({color: 0xff0000, emissive: 0x550000});
+            cpuDrone = new THREE.Mesh(geo, mat);
+            cpuDrone.position.set(4, 1.5, 35); 
+            scene.add(cpuDrone);
+        };
+
+        const targetRings = [];
+        const ringMaterial = new THREE.MeshBasicMaterial({ color: 0x39ff14, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+        const ringTorusGeo = new THREE.TorusGeometry(3.5, 0.25, 6, 16); 
+
+        const addTargetRing = (x, y, z, rX = 0, rY = 0) => {
+            const ring = new THREE.Mesh(ringTorusGeo, ringMaterial);
+            ring.position.set(x, y, z);
+            ring.rotation.x = rX;
+            ring.rotation.y = rY;
+            ring.userData.passed = false;
+            ring.userData.normal = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(rX, rY, 0)).normalize();
+            scene.add(ring);
+            targetRings.push(ring);
+        };
+
+        const loadMap = (index) => {
+            clearMap();
+            
+            passedRings = 0;
+            isCourseCleared = false;
+            ringCombo = 0; 
+            clearOverlay.classList.remove('opacity-100');
+            clearText.classList.remove('scale-100');
+            osdRingCount.innerText = "";
+            lastRingTime = 0;
+            activeMapConfig = mapConfigs[index];
+
+            if (index === 0) {
+                createTower();
+                createEnvironment();
+                addTargetRing(0, 10, 25, 0, 0);                  
+                addTargetRing(10, 20, 10, 0, -Math.PI/4);      
+                addTargetRing(0, 30, -5, 0, -Math.PI/2);       
+                addTargetRing(-10, 45, 10, 0, Math.PI*3/4);      
+                addTargetRing(0, 60, 20, 0, Math.PI);                  
+                addTargetRing(10, 75, 5, -Math.PI/6, -Math.PI/2);                  
+                addTargetRing(0, 92, 0, -Math.PI/2, 0); 
+                addTargetRing(0, 70, -2, -Math.PI/2, 0); 
+                addTargetRing(0, 40, -4, -Math.PI/2, 0); 
+                addTargetRing(0, 10, -6, 0, 0); 
+            } else if (index === 1) {
+                createForestMap();
+                addTargetRing(0, 5, 25, 0, 0);
+                addTargetRing(0, 8, 0, 0, 0);
+                addTargetRing(15, 6, -15, 0, Math.PI/4);
+                addTargetRing(30, 4, -30, 0, Math.PI/2);
+                addTargetRing(30, 8, -50, 0, Math.PI/2);
+                addTargetRing(15, 6, -65, 0, Math.PI*3/4);
+                addTargetRing(0, 5, -80, 0, Math.PI);
+                addTargetRing(-15, 8, -65, 0, -Math.PI*3/4);
+                addTargetRing(-30, 10, -50, 0, -Math.PI/2);
+                addTargetRing(-15, 5, -30, 0, -Math.PI/4);
+            } else if (index === 2) {
+                createCityMap();
+                addTargetRing(0, 15, 25, 0, 0);
+                addTargetRing(0, 20, 0, 0, 0);
+                addTargetRing(-20, 25, -20, 0, -Math.PI/4);
+                addTargetRing(-40, 30, -40, 0, -Math.PI/2);
+                addTargetRing(-40, 40, -60, Math.PI/6, -Math.PI/2);
+                addTargetRing(-20, 50, -80, Math.PI/4, Math.PI*3/4);
+                addTargetRing(0, 40, -60, Math.PI/2, 0);
+                addTargetRing(20, 20, -40, 0, Math.PI/4);
+                addTargetRing(40, 15, -20, 0, Math.PI/2);
+                addTargetRing(20, 15, 0, 0, Math.PI*3/4);
+            } else if (index === 3) {
+                createNeonMap();
+                addTargetRing(0, 10, 20, 0, 0);
+                addTargetRing(0, 15, 0, 0, 0);
+                addTargetRing(-20, 20, -20, 0, -Math.PI/4);
+                addTargetRing(-40, 25, -40, 0, -Math.PI/2);
+                addTargetRing(-20, 35, -60, 0, Math.PI*3/4);
+                addTargetRing(0, 40, -40, 0, Math.PI);
+                addTargetRing(20, 35, -20, 0, -Math.PI*3/4);
+                addTargetRing(40, 25, 0, 0, -Math.PI/2);
+                addTargetRing(20, 15, 20, 0, -Math.PI/4);
+                addTargetRing(0, 10, 0, 0, 0);
+            } else if (index === 4) {
+                createEuropeMap();
+                addTargetRing(0, 8, 15, 0, 0);
+                addTargetRing(0, 12, -15, 0, 0);
+                addTargetRing(20, 15, -25, 0, Math.PI/3);
+                addTargetRing(35, 20, -40, 0, Math.PI/2);
+                addTargetRing(20, 30, -55, 0, Math.PI*3/4);
+                addTargetRing(0, 45, -35, Math.PI/2, 0); 
+                addTargetRing(0, 20, -15, Math.PI/2, 0);
+                addTargetRing(-20, 15, -25, 0, -Math.PI/3);
+                addTargetRing(-35, 12, -40, 0, -Math.PI/2);
+                addTargetRing(-15, 8, -55, 0, -Math.PI*3/4);
+            } else if (index === 5) {
+                createRaceMap();
+                addTargetRing(0, 5, 20, 0, 0);
+                addTargetRing(0, 5, 0, 0, 0);
+                addTargetRing(-10, 8, -20, 0, -Math.PI/6);
+                addTargetRing(15, 10, -50, 0, Math.PI/6);
+                addTargetRing(30, 15, -80, 0, Math.PI/4);
+                addTargetRing(0, 20, -110, 0, -Math.PI/4);
+                addTargetRing(-30, 15, -140, 0, -Math.PI*3/4);
+                addTargetRing(-15, 10, -110, 0, -Math.PI*5/6);
+                addTargetRing(10, 8, -80, 0, Math.PI*5/6);
+                addTargetRing(0, 5, -50, 0, Math.PI);
+                
+                isRaceMode = true;
+                initCPUDrone();
+            } else if (index === 6) { 
+                createSchoolMap();
+                addTargetRing(0, 10, 50, 0, 0);
+                addTargetRing(0, 40, -50, 0, 0);
+                addTargetRing(100, 80, -150, 0, Math.PI/4);
+                addTargetRing(200, 120, -200, 0, Math.PI/2);
+                addTargetRing(400, 200, -200, 0, Math.PI/2);
+                addTargetRing(600, 250, -50, 0, Math.PI*3/4);
+                addTargetRing(500, 150, 100, 0, Math.PI);
+                addTargetRing(200, 80, 250, 0, -Math.PI*3/4);
+                addTargetRing(0, 40, 200, 0, -Math.PI/2);
+                addTargetRing(0, 10, 100, 0, 0);
+            }
+
+            activeMapObjects.updateMatrixWorld(true);
+            activeMapObjects.traverse((child) => {
+                if (child.isMesh || child.isGroup) {
+                    child.matrixAutoUpdate = false;
+                }
+            });
+
+            rawColliderMeshes.forEach(mesh => {
+                const worldPos = new THREE.Vector3();
+                mesh.getWorldPosition(worldPos);
+                
+                const worldScale = new THREE.Vector3();
+                mesh.getWorldScale(worldScale);
+                
+                const colData = {
+                    mesh: mesh,
+                    worldPos: worldPos,
+                    worldScale: worldScale,
+                    type: mesh.geometry.type,
+                    radius: 2, height: 2, w: 0, h: 0, d: 0, sphereRadius: 2
+                };
+                if (mesh.geometry.type === "CylinderGeometry") {
+                    const rTop = mesh.geometry.parameters.radiusTop || 1;
+                    const rBot = mesh.geometry.parameters.radiusBottom || 1;
+                    const maxR = Math.max(rTop, rBot);
+                    colData.radius = maxR * Math.max(worldScale.x, worldScale.z);
+                    colData.height = (mesh.geometry.parameters.height || 2) * worldScale.y;
+                    colData.sphereRadius = Math.sqrt(colData.radius * colData.radius + (colData.height/2)*(colData.height/2));
+                } else if (mesh.geometry.type === "BoxGeometry") {
+                    colData.w = (mesh.geometry.parameters.width || 1) * worldScale.x;
+                    colData.h = (mesh.geometry.parameters.height || 1) * worldScale.y;
+                    colData.d = (mesh.geometry.parameters.depth || 1) * worldScale.z;
+                    colData.sphereRadius = Math.sqrt(colData.w * colData.w + colData.h * colData.h + colData.d * colData.d) / 2; 
+                }
+                
+                colData.radius = colData.sphereRadius || 2;
+                colliders.push(colData);
+                spatialGrid.insert(colData);
+            });
+            
+            totalRings = targetRings.length;
+            osdRingCount.innerText = `[0/${totalRings}]`;
+
+            const mapNames = ["TOWER", "FOREST", "CITY", "NEON", "EUROPE", "RACE", "GIANT SCHOOL"];
+            osdControllerStatus.innerText = `MAP: ${mapNames[index]}`;
+            osdControllerStatus.classList.remove('text-gray-400', 'text-green-400');
+            osdControllerStatus.classList.add('text-orange-400', 'font-bold');
+            
+            setTimeout(() => {
+                if (gamepadIndex !== null) {
+                    osdControllerStatus.innerText = "CONTROLLER CONNECTED";
+                    osdControllerStatus.classList.replace('text-orange-400', 'text-green-400');
+                } else if (touchLeft.active || touchRight.active) {
+                    osdControllerStatus.innerText = "TOUCH INTERFACE ACTIVE";
+                    osdControllerStatus.classList.replace('text-orange-400', 'text-blue-400');
+                } else {
+                    osdControllerStatus.innerText = "KEYBOARD ACTIVE";
+                    osdControllerStatus.classList.replace('text-orange-400', 'text-gray-400');
+                    osdControllerStatus.classList.remove('font-bold');
+                }
+            }, 2000);
+
+            updateRingSizes();
+            resetDrone();
+        };
+
+        const initAudio = () => {
+            if (audioCtx) return;
+
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+
+            motorGain = audioCtx.createGain();
+            motorGain.gain.setValueAtTime(0, audioCtx.currentTime);
+
+            ambientGain = audioCtx.createGain();
+            ambientGain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+
+            noiseGain = audioCtx.createGain();
+            noiseGain.gain.setValueAtTime(0, audioCtx.currentTime);
+
+            motorOsc1 = audioCtx.createOscillator();
+            motorOsc1.type = 'sawtooth';
+            motorOsc1.frequency.setValueAtTime(120, audioCtx.currentTime);
+
+            motorOsc2 = audioCtx.createOscillator();
+            motorOsc2.type = 'triangle';
+            motorOsc2.frequency.setValueAtTime(60, audioCtx.currentTime);
+
+            const lowpass = audioCtx.createBiquadFilter();
+            lowpass.type = 'lowpass';
+            lowpass.frequency.setValueAtTime(2500, audioCtx.currentTime);
+
+            const waveshaper = audioCtx.createWaveShaper();
+            const makeDistortionCurve = (amount) => {
+                const k = typeof amount === 'number' ? amount : 50;
+                const n_samples = 44100;
+                const curve = new Float32Array(n_samples);
+                const deg = Math.PI / 180;
+                for (let i = 0; i < n_samples; ++i) {
+                    const x = (i * 2) / n_samples - 1;
+                    curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+                }
+                return curve;
+            };
+            waveshaper.curve = makeDistortionCurve(15);
+            waveshaper.oversample = '4x';
+
+            motorOsc1.connect(lowpass);
+            motorOsc2.connect(lowpass);
+            lowpass.connect(waveshaper);
+            waveshaper.connect(motorGain);
+            motorGain.connect(audioCtx.destination);
+
+            const bufferSize = audioCtx.sampleRate * 2;
+            const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            noiseGen = audioCtx.createBufferSource();
+            noiseGen.buffer = noiseBuffer;
+            noiseGen.loop = true;
+
+            const bandpass = audioCtx.createBiquadFilter();
+            bandpass.type = 'bandpass';
+            bandpass.frequency.setValueAtTime(400, audioCtx.currentTime);
+            bandpass.Q.setValueAtTime(1.0, audioCtx.currentTime);
+
+            noiseGen.connect(bandpass);
+            bandpass.connect(noiseGain);
+            noiseGain.connect(audioCtx.destination);
+
+            motorOsc1.start();
+            motorOsc2.start();
+            noiseGen.start();
+
+            audioEnabled = true;
+            soundToggleBtn.innerHTML = `<i data-lucide="volume-x" class="w-2.5 h-2.5"></i> SOUND STOP`;
+            soundToggleBtn.classList.remove('bg-amber-600');
+            soundToggleBtn.classList.add('bg-red-700');
+            lucide.createIcons({ root: soundToggleBtn });
+        };
+
+        const toggleSound = () => {
+            if (!audioCtx) {
+                initAudio();
+            } else {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                    audioEnabled = true;
+                    soundToggleBtn.innerHTML = `<i data-lucide="volume-x" class="w-2.5 h-2.5"></i> SOUND STOP`;
+                    soundToggleBtn.classList.remove('bg-amber-600');
+                    soundToggleBtn.classList.add('bg-red-700');
+                } else if (audioCtx.state === 'running') {
+                    audioCtx.suspend();
+                    audioEnabled = false;
+                    soundToggleBtn.innerHTML = `<i data-lucide="volume-2" class="w-2.5 h-2.5"></i> SOUND START`;
+                    soundToggleBtn.classList.remove('bg-red-700');
+                    soundToggleBtn.classList.add('bg-amber-600');
+                }
+                lucide.createIcons({ root: soundToggleBtn });
+            }
+        };
+
+        soundToggleBtn.addEventListener('click', toggleSound);
+
+        const cycleAccel = () => {
+            if (accelMultiplier === 1.0) accelMultiplier = 1.5;
+            else if (accelMultiplier === 1.5) accelMultiplier = 2.0;
+            else if (accelMultiplier === 2.0) accelMultiplier = 0.5;
+            else accelMultiplier = 1.0;
+            updateAccelUI();
+        };
+
+        const updateAccelUI = () => {
+            const btn = document.getElementById('accel-toggle-btn');
+            let pct = Math.round(accelMultiplier * 100);
+            btn.innerHTML = `<i data-lucide="zap" class="w-2.5 h-2.5"></i> ACCEL: ${pct}%`;
+            lucide.createIcons({ root: btn });
+        };
+
+        document.getElementById('accel-toggle-btn').addEventListener('click', cycleAccel);
+
+        const cycleSens = () => {
+            if (sensMultiplier === 1.0) sensMultiplier = 1.5;
+            else if (sensMultiplier === 1.5) sensMultiplier = 2.0;
+            else if (sensMultiplier === 2.0) sensMultiplier = 0.5;
+            else sensMultiplier = 1.0;
+            updateSensUI();
+        };
+
+        const updateSensUI = () => {
+            const btn = document.getElementById('sens-toggle-btn');
+            let pct = Math.round(sensMultiplier * 100);
+            btn.innerHTML = `<i data-lucide="mouse-pointer-2" class="w-2.5 h-2.5"></i> SENS: ${pct}%`;
+            lucide.createIcons({ root: btn });
+        };
+
+        document.getElementById('sens-toggle-btn').addEventListener('click', cycleSens);
+
+        const toggleTraining = () => {
+            isTrainingActive = !isTrainingActive;
+            const panel = document.getElementById('training-panel');
+            const btn = document.getElementById('training-toggle-btn');
+            
+            if (isTrainingActive) {
+                panel.classList.remove('hidden');
+                btn.innerHTML = `<i data-lucide="graduation-cap" class="w-2.5 h-2.5"></i> TRN: ON`;
+                btn.classList.replace('bg-purple-700', 'bg-purple-900');
+                currentTrickIndex = 0;
+                currentTrickStep = 0;
+                loadTrick(currentTrickIndex);
+            } else {
+                panel.classList.add('hidden');
+                btn.innerHTML = `<i data-lucide="graduation-cap" class="w-2.5 h-2.5"></i> TRN: OFF`;
+                btn.classList.replace('bg-purple-900', 'bg-purple-700');
+            }
+            lucide.createIcons({ root: btn });
+        };
+
+        const loadTrick = (index) => {
+            currentTrickIndex = index;
+            currentTrickStep = 0;
+            const trick = tricks[currentTrickIndex];
+            document.getElementById('trick-name').innerText = `技名: ${trick.name}`;
+            document.getElementById('trick-desc').innerText = trick.desc;
+            updateTrickUI();
+        };
+
+        const updateTrickUI = () => {
+            const trick = tricks[currentTrickIndex];
+            const step = trick.steps[currentTrickStep];
+            document.getElementById('trick-instruction').innerText = `${step.instruction}`;
+            document.getElementById('trick-progress').innerText = `ステップ: ${currentTrickStep + 1}/${trick.steps.length}`;
+        };
+
+        const nextTrick = () => {
+            currentTrickIndex = (currentTrickIndex + 1) % tricks.length;
+            loadTrick(currentTrickIndex);
+        };
+
+        document.getElementById('training-toggle-btn').addEventListener('click', toggleTraining);
+        document.getElementById('next-trick-btn').addEventListener('click', nextTrick);
+
+        const updateTrainingState = (deltaTime) => {
+            if (!isTrainingActive || droneState.isCrashed || isCourseCleared) return;
+
+            const trick = tricks[currentTrickIndex];
+            const step = trick.steps[currentTrickStep];
+
+            if (step.check()) {
+                currentTrickStep++;
+                if (currentTrickStep >= trick.steps.length) {
+                    isCourseCleared = true;
+                    clearTimeUI.innerText = "TRICK COMPLETED SUCCESSFUL!";
+                    clearOverlay.classList.add('opacity-100');
+                    clearText.classList.add('scale-100');
+                    playExcellentVoice();
+
+                    setTimeout(() => {
+                        isCourseCleared = false;
+                        clearOverlay.classList.remove('opacity-100');
+                        clearText.classList.remove('scale-100');
+                        nextTrick();
+                    }, 2500);
+                } else {
+                    updateTrickUI();
+                    if (audioCtx && audioEnabled) {
+                        const beepOsc = audioCtx.createOscillator();
+                        const beepGain = audioCtx.createGain();
+                        beepOsc.frequency.setValueAtTime(600, audioCtx.currentTime);
+                        beepGain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                        beepOsc.connect(beepGain);
+                        beepGain.connect(audioCtx.destination);
+                        beepOsc.start();
+                        beepOsc.stop(audioCtx.currentTime + 0.12);
+                    }
+                }
+            }
+        };
+
+        const updateAudioRPM = () => {
+            if (!audioEnabled || !audioCtx) return;
+
+            const thr01 = (droneState.throttle + 1.0) / 2.0;
+            const pitchHz = 120 + thr01 * 480; 
+            motorOsc1.frequency.setTargetAtTime(pitchHz, audioCtx.currentTime, 0.05);
+            motorOsc2.frequency.setTargetAtTime(pitchHz * 0.5, audioCtx.currentTime, 0.05);
+
+            const volumeMod = 0.15 + thr01 * 0.7 + (Math.sin(Date.now() * 0.05) * 0.05 * thr01);
+            motorGain.gain.setTargetAtTime(droneState.isCrashed ? 0 : volumeMod, audioCtx.currentTime, 0.03);
+
+            const speed = droneState.velocity.length();
+            const noiseVol = speed > 10 ? Math.min(0.8, (speed - 10) * 0.015) : 0.01;
+            noiseGain.gain.setTargetAtTime(droneState.isCrashed ? 0 : noiseVol, audioCtx.currentTime, 0.1);
+        };
+
+        window.addEventListener("gamepadconnected", (e) => {
+            gamepadIndex = e.gamepad.index;
+            osdControllerStatus.innerText = "CONTROLLER CONNECTED";
+            osdControllerStatus.classList.remove('text-gray-400');
+            osdControllerStatus.classList.add('text-green-400', 'font-bold');
+        });
+
+        window.addEventListener("gamepaddisconnected", (e) => {
+            if (gamepadIndex === e.gamepad.index) {
+                gamepadIndex = null;
+                osdControllerStatus.innerText = "KEYBOARD ACTIVE";
+                osdControllerStatus.classList.remove('text-green-400', 'font-bold');
+                osdControllerStatus.classList.add('text-gray-400');
+            }
+        });
+
+        const parseFixedTouchStart = (e, isLeft) => {
+            if (stickMode !== 'FIXED') return;
+            if (!helpModal.classList.contains('hidden')) return;
+            e.preventDefault();
+            
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                const targetObj = isLeft ? touchLeft : touchRight;
+                if (!targetObj.active) {
+                    targetObj.active = true;
+                    targetObj.id = touch.identifier;
+                    parseFixedTouchMove(e, isLeft); 
+                }
+            }
+        };
+
+        const parseFixedTouchMove = (e, isLeft) => {
+            if (stickMode !== 'FIXED') return;
+            if (!helpModal.classList.contains('hidden')) return;
+            e.preventDefault();
+            
+            const rect = e.currentTarget.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const maxDist = rect.width / 2;
+
+            for (let i = 0; i < e.touches.length; i++) {
+                const touch = e.touches[i];
+                const targetObj = isLeft ? touchLeft : touchRight;
+                if (targetObj.active && touch.identifier === targetObj.id) {
+                    const dx = touch.clientX - centerX;
+                    const dy = touch.clientY - centerY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist === 0) {
+                        targetObj.x = 0;
+                        targetObj.y = 0;
+                    } else {
+                        const clampedDist = Math.min(dist, maxDist);
+                        targetObj.x = (dx / dist) * (clampedDist / maxDist);
+                        targetObj.y = -(dy / dist) * (clampedDist / maxDist); 
+                    }
+                }
+            }
+        };
+
+        const handleFixedTouchEnd = (e, isLeft) => {
+            if (stickMode !== 'FIXED') return;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                const targetObj = isLeft ? touchLeft : touchRight;
+                if (targetObj.active && touch.identifier === targetObj.id) {
+                    targetObj.active = false;
+                    targetObj.id = null;
+                    targetObj.x = 0;
+                    targetObj.y = 0;
+                }
+            }
+        };
+
+        const setupTouchControls = () => {
+            leftFixedArea.addEventListener('touchstart', (e) => parseFixedTouchStart(e, true), { passive: false });
+            leftFixedArea.addEventListener('touchmove', (e) => parseFixedTouchMove(e, true), { passive: false });
+            leftFixedArea.addEventListener('touchend', (e) => handleFixedTouchEnd(e, true), { passive: false });
+            leftFixedArea.addEventListener('touchcancel', (e) => handleFixedTouchEnd(e, true), { passive: false });
+
+            rightFixedArea.addEventListener('touchstart', (e) => parseFixedTouchStart(e, false), { passive: false });
+            rightFixedArea.addEventListener('touchmove', (e) => parseFixedTouchMove(e, false), { passive: false });
+            rightFixedArea.addEventListener('touchend', (e) => handleFixedTouchEnd(e, false), { passive: false });
+            rightFixedArea.addEventListener('touchcancel', (e) => handleFixedTouchEnd(e, false), { passive: false });
+
+            window.addEventListener('touchstart', (e) => {
+                if (stickMode !== 'FLOAT') return;
+                if (!helpModal.classList.contains('hidden')) return;
+                if (e.target.closest('button') || e.target.closest('#help-modal') || e.target.closest('#noise-overlay')) return;
+
+                const W = window.innerWidth;
+                const H = window.innerHeight;
+
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    if (touch.clientY < H * 0.2) continue;
+
+                    const isLeftSide = touch.clientX < W * 0.38; 
+                    const isRightSide = touch.clientX > W * 0.62; 
+
+                    if (isLeftSide && !touchLeft.active) {
+                        touchLeft.active = true;
+                        touchLeft.id = touch.identifier;
+                        touchLeft.startX = touch.clientX;
+                        touchLeft.startY = touch.clientY;
+                        touchLeft.x = 0;
+                        touchLeft.y = 0;
+                        
+                        leftBase.style.left = touch.clientX + 'px';
+                        leftBase.style.top = touch.clientY + 'px';
+                        leftThumb.style.left = touch.clientX + 'px';
+                        leftThumb.style.top = touch.clientY + 'px';
+                        leftBase.style.opacity = '1';
+                        leftThumb.style.opacity = '1';
+                    } else if (isRightSide && !touchRight.active) {
+                        touchRight.active = true;
+                        touchRight.id = touch.identifier;
+                        touchRight.startX = touch.clientX;
+                        touchRight.startY = touch.clientY;
+                        touchRight.x = 0;
+                        touchRight.y = 0;
+                        
+                        rightBase.style.left = touch.clientX + 'px';
+                        rightBase.style.top = touch.clientY + 'px';
+                        rightThumb.style.left = touch.clientX + 'px';
+                        rightThumb.style.top = touch.clientY + 'px';
+                        rightBase.style.opacity = '1';
+                        rightThumb.style.opacity = '1';
+                    }
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchmove', (e) => {
+                if (stickMode !== 'FLOAT') return;
+                if (!helpModal.classList.contains('hidden')) return;
+                if (e.target.closest('button') || e.target.closest('#help-modal') || e.target.closest('#noise-overlay')) return;
+                
+                e.preventDefault(); 
+
+                for (let i = 0; i < e.touches.length; i++) {
+                    const touch = e.touches[i];
+
+                    if (touchLeft.active && touch.identifier === touchLeft.id) {
+                        const dx = touch.clientX - touchLeft.startX;
+                        const dy = touch.clientY - touchLeft.startY;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        let actualDx = 0, actualDy = 0;
+                        if (dist > 0) {
+                            const clampedDist = Math.min(dist, maxDragRadius);
+                            actualDx = (dx / dist) * clampedDist;
+                            actualDy = (dy / dist) * clampedDist;
+                            touchLeft.x = actualDx / maxDragRadius;
+                            touchLeft.y = -actualDy / maxDragRadius; 
+                        } else {
+                            touchLeft.x = 0;
+                            touchLeft.y = 0;
+                        }
+                        
+                        leftThumb.style.left = (touchLeft.startX + actualDx) + 'px';
+                        leftThumb.style.top = (touchLeft.startY + actualDy) + 'px';
+
+                    } else if (touchRight.active && touch.identifier === touchRight.id) {
+                        const dx = touch.clientX - touchRight.startX;
+                        const dy = touch.clientY - touchRight.startY;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        let actualDx = 0, actualDy = 0;
+                        if (dist > 0) {
+                            const clampedDist = Math.min(dist, maxDragRadius);
+                            actualDx = (dx / dist) * clampedDist;
+                            actualDy = (dy / dist) * clampedDist;
+                            touchRight.x = actualDx / maxDragRadius;
+                            touchRight.y = -actualDy / maxDragRadius; 
+                        } else {
+                            touchRight.x = 0;
+                            touchRight.y = 0;
+                        }
+                        
+                        rightThumb.style.left = (touchRight.startX + actualDx) + 'px';
+                        rightThumb.style.top = (touchRight.startY + actualDy) + 'px';
+                    }
+                }
+            }, { passive: false });
+
+            const handleWindowTouchEnd = (e) => {
+                if (stickMode !== 'FLOAT') return;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    if (touchLeft.active && touch.identifier === touchLeft.id) {
+                        touchLeft.active = false;
+                        touchLeft.id = null;
+                        touchLeft.x = 0;
+                        touchLeft.y = 0;
+                        
+                        leftBase.style.opacity = '0';
+                        leftThumb.style.opacity = '0';
+                    } else if (touchRight.active && touch.identifier === touchRight.id) {
+                        touchRight.active = false;
+                        touchRight.id = null;
+                        touchRight.x = 0;
+                        touchRight.y = 0;
+                        
+                        rightBase.style.opacity = '0';
+                        rightThumb.style.opacity = '0';
+                    }
+                }
+            };
+
+            window.addEventListener('touchend', handleWindowTouchEnd, { passive: false });
+            window.addEventListener('touchcancel', handleWindowTouchEnd, { passive: false });
+        };
+
+        const updateUIFadeState = (operating) => {
+            if (stickMode === 'FIXED') return; 
+            
+            const panel = document.getElementById('controller-panel');
+            const buttonsArea = document.getElementById('center-buttons-area');
+            const titleArea = document.getElementById('controller-title');
+
+            if (operating && !isUIFaded) {
+                isUIFaded = true;
+                panel.classList.remove('bg-zinc-900/90', 'backdrop-blur-md', 'border-zinc-700', 'shadow-2xl', 'border-2');
+                panel.classList.add('bg-transparent', 'border-transparent', 'shadow-none');
+                
+                buttonsArea.style.opacity = '0';
+                buttonsArea.style.pointerEvents = 'none';
+                titleArea.style.opacity = '0';
+
+            } else if (!operating && isUIFaded) {
+                isUIFaded = false;
+                if (!isSettingsHidden) {
+                    panel.classList.add('bg-zinc-900/90', 'backdrop-blur-md', 'border-zinc-700', 'shadow-2xl', 'border-2');
+                    panel.classList.remove('bg-transparent', 'border-transparent', 'shadow-none');
+                    
+                    buttonsArea.style.opacity = '1';
+                    buttonsArea.style.pointerEvents = 'auto';
+                    titleArea.style.opacity = '1';
+                }
+            }
+        };
+
+        const mapThrottleInput = (input) => {
+            const hoverThrottle = (0.8 / accelMultiplier) - 1.0; 
+
+            if (input < 0) {
+                return -1.0 + (input + 1.0) * (hoverThrottle + 1.0);
+            } else {
+                return hoverThrottle + input * (1.0 - hoverThrottle);
+            }
+        };
+
+        const handleInputs = () => {
+            let throttleIn = 0.0; 
+            let yawIn = 0.0;
+            let pitchIn = 0.0;
+            let rollIn = 0.0;
+            let isOperatingNow = false;
+
+            if (touchLeft.active || touchRight.active) {
+                isOperatingNow = true;
+                if (touchLeft.active) {
+                    throttleIn = touchLeft.y;
+                    yawIn = touchLeft.x;
+                }
+                if (touchRight.active) {
+                    pitchIn = touchRight.y;
+                    rollIn = touchRight.x;
+                }
+            }
+            else if (gamepadIndex !== null) {
+                const gp = navigator.getGamepads()[gamepadIndex];
+                if (gp) {
+                    throttleIn = -gp.axes[1]; 
+                    yawIn = gp.axes[0];
+                    pitchIn = -gp.axes[3];    
+                    rollIn = gp.axes[2];
+
+                    if (Math.abs(yawIn) > 0.05 || Math.abs(pitchIn) > 0.05 || Math.abs(rollIn) > 0.05 || Math.abs(throttleIn) > 0.05) {
+                        isOperatingNow = true;
+                    }
+
+                    if (Math.abs(yawIn) < 0.05) yawIn = 0;
+                    if (Math.abs(pitchIn) < 0.05) pitchIn = 0;
+                    if (Math.abs(rollIn) < 0.05) rollIn = 0;
+                    if (Math.abs(throttleIn) < 0.05) throttleIn = 0.0;
+
+                    if (gp.buttons[0] && gp.buttons[0].pressed) {
+                        if (!lastGamepadButton0) {
+                            resetDrone();
+                        }
+                        lastGamepadButton0 = true;
+                    } else {
+                        lastGamepadButton0 = false;
+                    }
+                }
+            } 
+            else {
+                if (keys['w']) { throttleIn = 1.0; isOperatingNow = true; }
+                else if (keys['s']) { throttleIn = -1.0; isOperatingNow = true; }
+                else throttleIn = 0.0; 
+
+                if (keys['a']) { yawIn = -1.0; isOperatingNow = true; }
+                else if (keys['d']) { yawIn = 1.0; isOperatingNow = true; }
+
+                if (keys['arrowup']) { pitchIn = 1.0; isOperatingNow = true; }     
+                else if (keys['arrowdown']) { pitchIn = -1.0; isOperatingNow = true; } 
+
+                if (keys['arrowleft']) { rollIn = -1.0; isOperatingNow = true; }   
+                else if (keys['arrowright']) { rollIn = 1.0; isOperatingNow = true; } 
+            }
+
+            updateUIFadeState(isOperatingNow);
+
+            droneState.targetThrottle = mapThrottleInput(throttleIn);
+            droneState.targetYaw = yawIn;
+            droneState.targetPitch = pitchIn;
+            droneState.targetRoll = rollIn;
+        };
+
+        const filterControls = (deltaTime) => {
+            const ease = 12.0 * deltaTime; 
+            droneState.throttle += (droneState.targetThrottle - droneState.throttle) * ease;
+            droneState.yaw += (droneState.targetYaw - droneState.yaw) * ease;
+            droneState.pitch += (droneState.targetPitch - droneState.pitch) * ease;
+            droneState.roll += (droneState.targetRoll - droneState.roll) * ease;
+
+            droneState.throttle = Math.max(-1.0, Math.min(1.0, droneState.throttle));
+            droneState.yaw = Math.max(-1.0, Math.min(1.0, droneState.yaw));
+            droneState.pitch = Math.max(-1.0, Math.min(1.0, droneState.pitch));
+            droneState.roll = Math.max(-1.0, Math.min(1.0, droneState.roll));
+        };
+
+        const updateControllerVisuals = () => {
+            let rawThr = 0.0;
+            const hoverThrottle = (0.8 / accelMultiplier) - 1.0;
+            if (droneState.throttle < hoverThrottle) {
+                rawThr = (droneState.throttle + 1.0) / (hoverThrottle + 1.0) - 1.0;
+            } else {
+                rawThr = (droneState.throttle - hoverThrottle) / (1.0 - hoverThrottle);
+            }
+
+            const lx = droneState.yaw * 30;
+            const ly = -rawThr * 30; 
+
+            const rx = droneState.roll * 30;
+            const ry = -droneState.pitch * 30; 
+
+            if (stickMode === 'FIXED') {
+                leftFixedThumb.style.transform = `translate(${lx}px, ${ly}px)`;
+                rightFixedThumb.style.transform = `translate(${rx}px, ${ry}px)`;
+            }
+        };
+
+        const cycleRingDifficulty = () => {
+            if (ringDifficulty === 'NORMAL') {
+                ringDifficulty = 'HARD';
+            } else if (ringDifficulty === 'HARD') {
+                ringDifficulty = 'EASY';
+            } else {
+                ringDifficulty = 'NORMAL';
+            }
+            updateRingDifficultyUI();
+            updateRingSizes();
+        };
+
+        const updateRingDifficultyUI = () => {
+            const osd = document.getElementById('osd-ring-diff');
+            const btn = document.getElementById('difficulty-toggle-btn');
+            
+            if (ringDifficulty === 'EASY') {
+                osd.innerText = 'EASY';
+                osd.className = 'text-blue-400 font-bold';
+                btn.innerHTML = `<i data-lucide="shield" class="w-2.5 h-2.5"></i> RINGS: EASY`;
+                btn.className = 'px-1 py-1.5 bg-blue-700 hover:bg-blue-600 text-white font-bold text-[8px] rounded border border-blue-500 transition flex items-center justify-center gap-1 shadow-md';
+            } else if (ringDifficulty === 'HARD') {
+                osd.innerText = 'HARD';
+                osd.className = 'text-red-500 font-bold';
+                btn.innerHTML = `<i data-lucide="shield-alert" class="w-2.5 h-2.5"></i> RINGS: HARD`;
+                btn.className = 'px-1 py-1.5 bg-red-700 hover:bg-red-600 text-white font-bold text-[8px] rounded border border-red-500 transition flex items-center justify-center gap-1 shadow-md';
+            } else {
+                osd.innerText = 'NORMAL';
+                osd.className = 'text-green-400 font-bold';
+                btn.innerHTML = `<i data-lucide="shield" class="w-2.5 h-2.5"></i> RINGS: NORMAL`;
+                btn.className = 'px-1 py-1.5 bg-green-700 hover:bg-green-600 text-white font-bold text-[8px] rounded border border-green-500 transition flex items-center justify-center gap-1 shadow-md';
+            }
+            lucide.createIcons({ root: btn });
+        };
+
+        const updateRingSizes = () => {
+            let scale = 1.0;
+            if (ringDifficulty === 'EASY') scale = 5.5 / 3.5;
+            if (ringDifficulty === 'HARD') scale = 2.0 / 3.5;
+            
+            targetRings.forEach(ring => {
+                ring.scale.set(scale, scale, scale);
+            });
+        };
+
+        const getCollisionRadius = () => {
+            if (ringDifficulty === 'EASY') return 5.8;
+            if (ringDifficulty === 'HARD') return 2.3;
+            return 3.8; 
+        };
+
+        document.getElementById('difficulty-toggle-btn').addEventListener('click', cycleRingDifficulty);
+
+        const updateCPUDrone = (deltaTime) => {
+            if (!isRaceMode || !cpuDrone || targetRings.length === 0 || isCourseCleared) return;
+            if (currentTargetRingIndex >= targetRings.length) return;
+
+            const target = targetRings[currentTargetRingIndex].position;
+            const direction = new THREE.Vector3().subVectors(target, cpuDrone.position);
+            const distance = direction.length();
+
+            if (distance < 4.0) {
+                currentTargetRingIndex++;
+            } else {
+                direction.normalize();
+                const speed = 25.0; 
+                cpuDrone.position.addScaledVector(direction, speed * deltaTime);
+                cpuDrone.lookAt(target);
+            }
+        };
+
+        const updateMinimap = () => {
+            const canvas = document.getElementById('minimap');
+            if (!canvas || !canvas.getContext) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 128, 128);
+            
+            const scale = 0.25; 
+            const cx = 64;
+            const cy = 64;
+
+            ctx.fillStyle = 'rgba(57, 255, 20, 0.8)';
+            targetRings.forEach(r => {
+                if (r.visible && !r.userData.passed) {
+                    const dx = r.position.x - droneState.position.x;
+                    const dz = r.position.z - droneState.position.z;
+                    const mx = cx + (dx * scale);
+                    const my = cy + (dz * scale);
+                    
+                    if(mx > 0 && mx < 128 && my > 0 && my < 128) {
+                        ctx.beginPath();
+                        ctx.arc(mx, my, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            });
+
+            ctx.fillStyle = '#ff3333';
+            ctx.beginPath();
+            ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+            ctx.fill();
+        };
+
+        const updatePhysics = (deltaTime) => {
+            if (droneState.isCrashed) return;
+
+            const currentMaxAngularSpeed = config.maxAngularSpeed * sensMultiplier;
+
+            const currentEulerForTrick = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'ZXY');
+            let deltaRoll = currentEulerForTrick.z - droneState.lastRollEuler;
+            if (deltaRoll > Math.PI) deltaRoll -= Math.PI * 2;
+            if (deltaRoll < -Math.PI) deltaRoll += Math.PI * 2;
+            droneState.rollAccumulator += deltaRoll;
+            droneState.lastRollEuler = currentEulerForTrick.z;
+
+            if (isEasyMode) {
+                // --- FIXED: Angle calculation applies selected mode ---
+                const maxAngle = maxAngleMode === '180' ? Math.PI * 0.95 : Math.PI / 2.5; 
+
+                if (typeof droneState.easyYaw === 'undefined' || droneState.flightTime === 0) {
+                    const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ');
+                    droneState.easyYaw = euler.y;
+                }
+
+                droneState.easyYaw += -droneState.yaw * currentMaxAngularSpeed * deltaTime;
+
+                const targetPitchAngle = droneState.pitch * maxAngle;
+                const targetRollAngle = -droneState.roll * maxAngle; 
+
+                const targetEuler = new THREE.Euler(targetPitchAngle, droneState.easyYaw, targetRollAngle, 'YXZ');
+                const targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
+
+                droneState.quaternion.slerp(targetQuat, 10.0 * deltaTime);
+            } else {
+                droneState.easyYaw = undefined;
+                const localRotation = new THREE.Euler(
+                    droneState.pitch * currentMaxAngularSpeed * deltaTime,
+                    -droneState.yaw * currentMaxAngularSpeed * deltaTime, 
+                    -droneState.roll * currentMaxAngularSpeed * deltaTime,
+                    'YXZ' 
+                );
+
+                const deltaQuat = new THREE.Quaternion().setFromEuler(localRotation);
+                droneState.quaternion.multiplyQuaternions(droneState.quaternion, deltaQuat).normalize();
+            }
+            
+            droneModel.quaternion.copy(droneState.quaternion);
+
+            const upLocal = new THREE.Vector3(0, 1, 0);
+            upLocal.applyQuaternion(droneState.quaternion); 
+
+            const thr01 = (droneState.throttle + 1.0) / 2.0;
+            const thrustMagnitude = thr01 * 45.0 * accelMultiplier; 
+            const thrustForce = upLocal.clone().multiplyScalar(thrustMagnitude);
+
+            const gravityForce = new THREE.Vector3(0, -config.gravity, 0);
+            const acceleration = new THREE.Vector3().addVectors(thrustForce, gravityForce);
+
+            droneState.velocity.addScaledVector(acceleration, deltaTime);
+            
+            const speed = droneState.velocity.length();
+            if (speed > 0) {
+                const linearDrag = config.airResistance; 
+                const quadraticDrag = 0.015; 
+                const dragMagnitude = linearDrag + quadraticDrag * speed;
+                const dragForce = droneState.velocity.clone().multiplyScalar(-dragMagnitude);
+                droneState.velocity.addScaledVector(dragForce, deltaTime);
+            }
+
+            let currentWind = activeMapConfig.wind.clone();
+            targetRings.forEach(ring => {
+                if (ring.visible && !ring.userData.passed) {
+                    const distSq = droneState.position.distanceToSquared(ring.position);
+                    if (distSq < 225) { 
+                        const dist = Math.sqrt(distSq);
+                        const intensity = (15 - dist) / 15;
+                        const vortex = new THREE.Vector3(
+                            Math.sin(droneState.flightTime * 3.0 + ring.position.x) * 5.0,
+                            Math.cos(droneState.flightTime * 2.0) * 3.0 + 2.0, 
+                            Math.sin(droneState.flightTime * 3.0 + ring.position.z) * 5.0
+                        ).multiplyScalar(intensity);
+                        currentWind.add(vortex);
+                    }
+                }
+            });
+            droneState.velocity.addScaledVector(currentWind, deltaTime);
+
+            droneState.position.addScaledVector(droneState.velocity, deltaTime);
+            droneModel.position.copy(droneState.position);
+
+            if (!isTPS) {
+                camera.quaternion.copy(droneState.quaternion);
+                
+                camera.position.copy(droneState.position);
+            } else {
+                const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ');
+                const yawQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0, 'YXZ'));
+                
+                const offset = new THREE.Vector3(0, 1.0, 3.0);
+                offset.applyQuaternion(yawQuat);
+                const targetPosition = droneState.position.clone().add(offset);
+                
+                camera.position.x += (targetPosition.x - camera.position.x) * 12.0 * deltaTime;
+                camera.position.z += (targetPosition.z - camera.position.z) * 12.0 * deltaTime;
+                camera.position.y += (targetPosition.y - camera.position.y) * 4.0 * deltaTime;
+                
+                camera.lookAt(droneState.position);
+            }
+
+            if (droneState.position.y <= 0.2) {
+                droneState.position.y = 0.2;
+                const verticalImpact = Math.abs(droneState.velocity.y);
+                const horizontalSpeed = Math.sqrt(droneState.velocity.x**2 + droneState.velocity.z**2);
+
+                if (verticalImpact > 8.0 || horizontalSpeed > 15.0) {
+                    if (damageMode === 'CRASH') {
+                        triggerCrash();
+                    } else {
+                        droneState.velocity.y = verticalImpact * 0.45; 
+                        droneState.velocity.x *= 0.7;
+                        droneState.velocity.z *= 0.7;
+                        droneState.position.y = 0.21;
+                        
+                        if (audioCtx && audioEnabled) {
+                            const thudOsc = audioCtx.createOscillator();
+                            const thudGain = audioCtx.createGain();
+                            thudOsc.type = 'triangle';
+                            thudOsc.frequency.setValueAtTime(80, audioCtx.currentTime);
+                            thudOsc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.1);
+                            thudGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                            thudGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                            thudOsc.connect(thudGain);
+                            thudGain.connect(audioCtx.destination);
+                            thudOsc.start();
+                            thudOsc.stop(audioCtx.currentTime + 0.1);
+                        }
+                    }
+                } else {
+                    if (verticalImpact > 1.0) {
+                        droneState.velocity.y = verticalImpact * 0.2; 
+                        droneState.position.y = 0.21;
+                    } else {
+                        droneState.velocity.y = 0;
+                    }
+                    
+                    const groundFriction = 3.0;
+                    droneState.velocity.x *= Math.max(0, 1.0 - groundFriction * deltaTime);
+                    droneState.velocity.z *= Math.max(0, 1.0 - groundFriction * deltaTime);
+                    
+                    if (droneState.velocity.lengthSq() < 0.05) {
+                        droneState.velocity.set(0, 0, 0); 
+                    }
+                }
+            }
+        };
+
+        const checkCollisions = () => {
+            if (droneState.isCrashed) return;
+
+            const droneRadius = 0.6;
+            const dronePos = droneState.position;
+
+            const nearbyColliders = spatialGrid.getNearby(dronePos.x, dronePos.z);
+
+            for (let i = 0; i < nearbyColliders.length; i++) {
+                const colData = nearbyColliders[i];
+                const tempPos = colData.worldPos;
+
+                const maxDist = colData.sphereRadius + droneRadius;
+                if (dronePos.distanceToSquared(tempPos) > maxDist * maxDist) continue; 
+
+                let isHit = false;
+                
+                const localDronePos = dronePos.clone();
+                colData.mesh.worldToLocal(localDronePos);
+
+                if (colData.type === "CylinderGeometry") {
+                    const r = colData.mesh.geometry.parameters.radiusTop || 1.0;
+                    const h = colData.mesh.geometry.parameters.height || 2.0;
+
+                    const localDroneRadiusX = droneRadius / colData.worldScale.x;
+                    const localDroneRadiusY = droneRadius / colData.worldScale.y;
+                    const localDroneRadiusZ = droneRadius / colData.worldScale.z;
+
+                    const radialDist = Math.sqrt(localDronePos.x * localDronePos.x + localDronePos.z * localDronePos.z);
+
+                    if (Math.abs(localDronePos.y) < (h / 2 + localDroneRadiusY) && radialDist < (r + Math.max(localDroneRadiusX, localDroneRadiusZ))) {
+                        isHit = true;
+                    }
+                } else if (colData.type === "BoxGeometry") {
+                    const w = colData.w;
+                    const h = colData.h;
+                    const d = colData.d;
+
+                    const localDroneRadiusX = droneRadius / colData.worldScale.x;
+                    const localDroneRadiusY = droneRadius / colData.worldScale.y;
+                    const localDroneRadiusZ = droneRadius / colData.worldScale.z;
+
+                    if (Math.abs(localDronePos.x) < (w / 2 + localDroneRadiusX) &&
+                        Math.abs(localDronePos.y) < (h / 2 + localDroneRadiusY) &&
+                        Math.abs(localDronePos.z) < (d / 2 + localDroneRadiusZ)) {
+                        isHit = true;
+                    }
+                }
+
+                if (isHit) {
+                    if (damageMode === 'CRASH') {
+                        triggerCrash();
+                    } else {
+                        const normal = new THREE.Vector3().subVectors(dronePos, tempPos);
+                        normal.y *= 0.5; 
+                        if (normal.lengthSq() > 0) normal.normalize();
+                        else normal.set(0, 1, 0);
+
+                        const dot = droneState.velocity.dot(normal);
+                        if (dot < 0) {
+                            droneState.velocity.sub(normal.clone().multiplyScalar(2 * dot));
+                        }
+                        droneState.velocity.multiplyScalar(0.5); 
+                        droneState.position.add(normal.multiplyScalar(0.5)); 
+
+                        if (audioCtx && audioEnabled) {
+                            const beepOsc = audioCtx.createOscillator();
+                            const beepGain = audioCtx.createGain();
+                            beepOsc.type = 'square';
+                            beepOsc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                            beepOsc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.1);
+                            beepGain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                            beepGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                            beepOsc.connect(beepGain);
+                            beepGain.connect(audioCtx.destination);
+                            beepOsc.start();
+                            beepOsc.stop(audioCtx.currentTime + 0.1);
+                        }
+                    }
+                    break;
+                }
+            }
+
+            const colRadius = getCollisionRadius();
+            targetRings.forEach((ring) => {
+                if (ring.visible && !ring.userData.passed && dronePos.distanceTo(ring.position) < colRadius) {
+                    
+                    const dotProd = ring.userData.normal.dot(droneState.velocity);
+                    if (dotProd < 0) {
+                        ring.userData.passed = true;
+                        ring.material.color.setHex(0xffff00);
+                        
+                        fovPunch = 70.0; 
+                        const flash = document.getElementById('ring-flash');
+                        if (flash) {
+                            flash.style.transition = 'none';
+                            flash.style.opacity = '1';
+                            setTimeout(() => {
+                                flash.style.transition = 'opacity 0.4s ease-out';
+                                flash.style.opacity = '0';
+                            }, 50);
+                        }
+
+                        setTimeout(() => {
+                            ring.visible = false;
+                        }, 500);
+
+                        passedRings++;
+                        osdRingCount.innerText = `[${passedRings}/${totalRings}]`;
+                        
+                        const currentMs = droneState.flightTime;
+                        if (passedRings > 1) {
+                            const split = currentMs - lastRingTime;
+                            if (split < 4.0) {
+                                ringCombo++;
+                            } else {
+                                ringCombo = 1;
+                            }
+                            const splitEl = document.getElementById('osd-split');
+                            const comboText = ringCombo > 1 ? ` ${ringCombo} COMBO!` : "";
+                            splitEl.innerText = `+${split.toFixed(2)}s${comboText}`;
+                            splitEl.style.color = ringCombo > 2 ? '#ff5555' : '#facc15';
+                            splitEl.style.opacity = '1';
+                            setTimeout(() => { splitEl.style.opacity = '0'; }, 2000);
+                        } else {
+                            ringCombo = 1;
+                        }
+                        lastRingTime = currentMs;
+
+                        if (passedRings === totalRings && !isCourseCleared) {
+                            isCourseCleared = true;
+                            
+                            const clearTimeStr = osdTimer.innerText.replace('STK ', '');
+                            const mapName = ["TOWER", "FOREST", "CITY", "NEON", "EUROPE", "RACE", "GIANT SCHOOL"][currentMapIndex];
+                            const bestTimeKey = `bestTime_${mapName}`;
+                            const prevBestTime = localStorage.getItem(bestTimeKey);
+                            
+                            let isNewRecord = false;
+                            if (!prevBestTime || currentMs < parseFloat(prevBestTime)) {
+                                localStorage.setItem(bestTimeKey, currentMs.toString());
+                                isNewRecord = true;
+                            }
+                            
+                            if (isNewRecord) {
+                                clearTimeUI.innerHTML = `TIME: ${clearTimeStr} <br><span class="text-red-500 text-sm animate-pulse">NEW RECORD!</span>`;
+                            } else {
+                                const pTime = parseFloat(prevBestTime);
+                                const pPad = (num, size = 2) => ('00' + num).slice(-size);
+                                const pMin = Math.floor(pTime / 60);
+                                const pSec = Math.floor(pTime % 60);
+                                const pMs = Math.floor((pTime % 1) * 100);
+                                clearTimeUI.innerHTML = `TIME: ${clearTimeStr} <br><span class="text-gray-300 text-xs">BEST: ${pPad(pMin)}:${pPad(pSec)}:${pPad(pMs)}</span>`;
+                            }
+
+                            clearOverlay.classList.add('opacity-100');
+                            clearText.classList.add('scale-100');
+                            playExcellentVoice();
+                        }
+
+                        if (audioCtx && audioEnabled) {
+                            const beepOsc = audioCtx.createOscillator();
+                            const beepGain = audioCtx.createGain();
+                            beepOsc.frequency.setValueAtTime(880 + ringCombo * 110, audioCtx.currentTime);
+                            beepGain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                            beepOsc.connect(beepGain);
+                            beepGain.connect(audioCtx.destination);
+                            beepOsc.start();
+                            beepOsc.stop(audioCtx.currentTime + 0.15);
+                        }
+                    }
+                }
+            });
+        };
+
+        const triggerCrash = () => {
+            droneState.isCrashed = true;
+            droneState.velocity.set(0, 0, 0);
+
+            if (audioCtx && audioEnabled) {
+                const crashOsc = audioCtx.createOscillator();
+                const crashGain = audioCtx.createGain();
+                crashOsc.type = 'sawtooth';
+                crashOsc.frequency.setValueAtTime(40, audioCtx.currentTime);
+                crashOsc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.5);
+                crashGain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                crashGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+
+                crashOsc.connect(crashGain);
+                crashGain.connect(audioCtx.destination);
+                crashOsc.start();
+                crashOsc.stop(audioCtx.currentTime + 0.5);
+
+                motorGain.gain.setValueAtTime(0, audioCtx.currentTime);
+                noiseGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            }
+
+            noiseOverlay.classList.add('active');
+        };
+
+        const resetDrone = () => {
+            droneState.position.set(0, 1.5, 35);
+            droneState.velocity.set(0, 0, 0);
+            droneState.quaternion.setFromEuler(new THREE.Euler(0, 0, 0));
+            const hoverThrust = (0.8 / accelMultiplier) - 1.0;
+            droneState.targetThrottle = hoverThrust; 
+            droneState.throttle = hoverThrust;
+            droneState.yaw = 0;
+            droneState.pitch = 0;
+            droneState.roll = 0;
+            droneState.isCrashed = false;
+            droneState.flightTime = 0;
+            
+            droneState.rollAccumulator = 0;
+            droneState.lastRollEuler = 0;
+
+            droneModel.position.copy(droneState.position);
+            droneModel.quaternion.copy(droneState.quaternion);
+
+            if (!isTPS) {
+                camera.position.copy(droneState.position);
+            } else {
+                const euler = new THREE.Euler().setFromQuaternion(droneState.quaternion, 'YXZ');
+                const yawQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0, 'YXZ'));
+                const offset = new THREE.Vector3(0, 1.0, 3.0).applyQuaternion(yawQuat);
+                camera.position.copy(droneState.position).add(offset);
+                camera.lookAt(droneState.position);
+            }
+            fovPunch = 0.0;
+
+            noiseOverlay.classList.remove('active');
+
+            passedRings = 0;
+            isCourseCleared = false;
+            ringCombo = 0;
+            clearOverlay.classList.remove('opacity-100');
+            clearText.classList.remove('scale-100');
+            osdRingCount.innerText = `[0/${totalRings}]`;
+            lastRingTime = 0;
+
+            if (isRaceMode && cpuDrone) {
+                cpuDrone.position.set(4, 1.5, 35);
+                cpuDrone.lookAt(new THREE.Vector3(4, 1.5, 0));
+                currentTargetRingIndex = 0;
+            }
+
+            if (isTrainingActive) {
+                currentTrickStep = 0;
+                updateTrickUI();
+            }
+
+            targetRings.forEach(ring => {
+                ring.visible = true;
+                ring.material.color.setHex(0x39ff14);
+                ring.userData.passed = false;
+            });
+        };
+
+        restartBtn.addEventListener('click', resetDrone);
+
+        howToPlayBtn.addEventListener('click', () => {
+            helpModal.classList.remove('hidden');
+        });
+        closeHelpBtn.addEventListener('click', () => {
+            helpModal.classList.add('hidden');
+            if (!audioCtx) initAudio();
+        });
+
+        const updateOSD = (deltaTime) => {
+            if (!droneState.isCrashed && !isCourseCleared) {
+                droneState.flightTime += deltaTime;
+            }
+
+            const speedKmh = (droneState.velocity.length() * 3.6).toFixed(1);
+            osdSpeed.innerText = `SPD: ${speedKmh} km/h`;
+
+            const altitude = Math.max(0, droneState.position.y - 0.2).toFixed(1);
+            osdAlt.innerText = `ALT: ${altitude} m`;
+
+            const batV = Math.max(13.8, 16.8 - (droneState.flightTime * 0.008)).toFixed(2);
+            osdBattery.innerText = `BAT: ${batV}V (4S)`;
+
+            const thr01 = (droneState.throttle + 1.0) / 2.0;
+            osdThrottle.innerText = `THR: ${Math.round(thr01 * 100)}%`;
+
+            const pad = (num, size = 2) => ('00' + num).slice(-size);
+            const totalSec = Math.floor(droneState.flightTime);
+            const minutes = Math.floor(totalSec / 60);
+            const seconds = totalSec % 60;
+            const ms = Math.floor((droneState.flightTime % 1) * 100);
+            osdTimer.innerText = `STK ${pad(minutes)}:${pad(seconds)}:${pad(ms)}`;
+        };
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            applyGfx(); 
+            maxDragRadius = Math.min(window.innerWidth, window.innerHeight) * 0.12; 
+        });
+
+        setupTouchControls();
+        loadMap(0);
+
+        let lastTime = performance.now();
+        const animate = () => {
+            requestAnimationFrame(animate);
+
+            const currentTime = performance.now();
+            const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.1); 
+            lastTime = currentTime;
+
+            handleInputs();
+            filterControls(deltaTime);
+            updatePhysics(deltaTime);
+            
+            if (isRaceMode) {
+                updateCPUDrone(deltaTime);
+            }
+            
+            updateTrainingState(deltaTime);
+            checkCollisions();
+            updateControllerVisuals();
+            updateMinimap();
+
+            const speed = droneState.velocity.length();
+            updateSpeedLines(speed, deltaTime);
+            updateAudioRPM();
+
+            fovPunch = Math.max(0, fovPunch - deltaTime * 50.0); 
+            
+            let targetFov = 125 + fovPunch;
+            if (targetFov > 160) targetFov = 160; 
+
+            if (isTPS) {
+                targetFov = 90 + (fovPunch * 0.5);
+                if (targetFov > 110) targetFov = 110;
+            }
+
+            camera.fov = targetFov;
+            camera.updateProjectionMatrix();
+
+            updateOSD(deltaTime);
+
+            renderer.render(scene, camera);
+        };
+
+        window.onload = () => {
+            toggleMode(); toggleMode(); 
+            toggleAngleMode(); toggleAngleMode(); // Initialize new mode properly
+            animate();
+        };
+
+    </script>
+</body>
+</html>
+
+
+```
